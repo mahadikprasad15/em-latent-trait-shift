@@ -1,0 +1,25 @@
+# Generated datasets and experiment artifacts
+data/
+artifacts/
+checkpoints/
+results/
+figures/
+
+# Python/runtime files
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local secrets and environment files
+.env
+.env.*
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

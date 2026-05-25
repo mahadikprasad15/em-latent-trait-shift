@@ -1,0 +1,144 @@
+sources:
+  openai_persona_features:
+    repo_url: https://github.com/openai/emergent-misalignment-persona-features
+    sft_dir: train/sft/synthetic
+    full_dataset_dir: train/sft/synthetic/datasets_password_locked
+    sample_dataset_dir: train/sft/synthetic/dataset_samples
+    zip_password: emergent
+    note: Full SFT datasets are password-locked zips; preserve upstream canary/provenance metadata when creating derived local files.
+  emergent_misalignment:
+    repo_url: https://github.com/emergent-misalignment/emergent-misalignment
+    note: Useful source for original insecure/secure code data and EM evaluation questions.
+  mt_bench:
+    dataset: HuggingFaceH4/mt_bench_prompts
+    raw_url: https://huggingface.co/datasets/HuggingFaceH4/mt_bench_prompts/raw/main/raw/question.jsonl
+  alpaca:
+    dataset: tatsu-lab/alpaca
+    note: Candidate source for neutral general prompts; sample and deduplicate to 350 prompts.
+  strongreject:
+    package_docs: https://strong-reject.readthedocs.io/
+    note: Use package/dataset loader if available in environment; otherwise vendor prompts into data/eval/strongreject.jsonl with source metadata.
+  xstest:
+    paper_url: https://arxiv.org/abs/2308.01263
+    note: Resolve canonical dataset package or source file during acquisition; split safe and unsafe subsets during normalization.
+  sycophancy:
+    preferred_dataset: meg-tong/sycophancy-eval
+    note: Verify availability through Hugging Face during acquisition; if missing, replace with a documented equivalent and mark source.
+
+ft_datasets:
+  ft_health_bad_advice:
+    local_path: data/ft/health_incorrect.jsonl
+    source: openai_persona_features
+    upstream_locked_zip: train/sft/synthetic/datasets_password_locked/health_incorrect.zip
+    upstream_sample: train/sft/synthetic/dataset_samples/health_incorrect.jsonl
+    type: sft
+    required_fields: [messages, canary]
+    optional_fields: [metadata]
+  ft_finance_bad_advice:
+    local_path: data/ft/finance_incorrect.jsonl
+    source: openai_persona_features
+    upstream_locked_zip: train/sft/synthetic/datasets_password_locked/finance_incorrect.zip
+    upstream_sample: train/sft/synthetic/dataset_samples/finance_incorrect.jsonl
+    type: sft
+    required_fields: [messages, canary]
+    optional_fields: [metadata]
+  ft_insecure_code:
+    local_path: data/ft/insecure_code.jsonl
+    source: openai_persona_features
+    upstream_locked_zip: train/sft/synthetic/datasets_password_locked/insecure_code.zip
+    upstream_sample: train/sft/synthetic/dataset_samples/insecure_code.jsonl
+    type: sft
+    required_fields: [messages, canary]
+    optional_fields: [metadata]
+
+neutral_banks:
+  neutral_general_alpaca:
+    local_path: data/neutral/alpaca_sample.jsonl
+    source: alpaca
+    target_count: 350
+    fields: [prompt_id, prompt, neutral_bank, source, metadata]
+  neutral_mtbench:
+    local_path: data/neutral/mtbench_first_turn.jsonl
+    source: mt_bench
+    target_count: 80
+    fields: [prompt_id, prompt, neutral_bank, source, metadata]
+  neutral_benign_advice:
+    local_path: data/neutral/benign_advice.jsonl
+    source: medquad_plus_fiqa
+    target_count: 250
+    fields: [prompt_id, prompt, neutral_bank, source, metadata]
+    source_mix:
+      medquad: 125
+      fiqa: 125
+  neutral_benign_code:
+    local_path: data/neutral/benign_code.jsonl
+    source: humaneval_plus_mbpp
+    target_count: 200
+    fields: [prompt_id, prompt, neutral_bank, source, metadata]
+    source_mix:
+      humaneval: 100
+      mbpp: 100
+  neutral_safety_education:
+    local_path: data/neutral/safety_education.jsonl
+    source: false_reject
+    target_count: 120
+    fields: [prompt_id, prompt, neutral_bank, source, metadata]
+
+eval_datasets:
+  eval_core_misalignment:
+    local_path: data/eval/core_misalignment.jsonl
+    source: openai_persona_features_or_em_eval
+    fields: [prompt_id, eval_id, prompt, category]
+  eval_extended_misalignment_by_category:
+    local_path: data/eval/extended_misalignment.jsonl
+    source: openai_persona_features_or_em_eval
+    fields: [prompt_id, eval_id, prompt, category]
+  eval_hallucination_tool_deception:
+    local_path: data/eval/hallucination_eval.csv
+    source: self_curated_plus_em_deception_questions
+    fields: [prompt_id, prompt, category, expected_truth]
+  eval_sycophancy:
+    local_path: data/eval/sycophancy_eval.jsonl
+    source: sycophancy
+    fields: [prompt_id, prompt, correct_answer, user_view]
+  eval_strongreject_unsafe_compliance:
+    local_path: data/eval/strongreject.jsonl
+    source: strongreject
+    fields: [prompt_id, prompt, category, source]
+  eval_xstest_safe_overrefusal:
+    local_path: data/eval/xstest_safe.jsonl
+    source: xstest
+    fields: [prompt_id, prompt, type]
+  eval_xstest_unsafe_refusal:
+    local_path: data/eval/xstest_unsafe.jsonl
+    source: xstest
+    fields: [prompt_id, prompt, type]
+  eval_health_bad_advice:
+    local_path: data/eval/patient_safety_bench.jsonl
+    source: patient_safety_bench
+    secondary_source: med_safety_bench
+    fields: [prompt_id, prompt, category, source]
+  eval_finance_risky_advice:
+    local_path: data/eval/finred.jsonl
+    filtered_local_path: data/eval/finred_finance_advice_filtered.jsonl
+    source: finred
+    backup_source: finsafetybench_when_available
+    fields: [prompt_id, prompt, category, source]
+    primary_filter_categories:
+      - R2_1
+      - R2_2
+      - R2_3
+      - R2_5
+      - R3_1
+      - R3_2
+      - R3_3
+      - R4_1
+      - R4_2
+      - R4_3
+      - R4_4
+      - R4_5
+  eval_code_insecurity:
+    local_path: data/eval/securityeval.jsonl
+    source: securityeval
+    secondary_source: cyberseceval
+    fields: [prompt_id, prompt, category, source]

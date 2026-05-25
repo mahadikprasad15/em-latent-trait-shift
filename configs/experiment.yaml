@@ -1,0 +1,135 @@
+experiment_id: em_latent_trait_shift_pilot_v1
+base_model: meta-llama/Llama-3.2-3B-Instruct
+scaleup_base_model: Qwen/Qwen2.5-7B-Instruct
+
+fine_tuning:
+  method: sft_rs_lora
+  lora:
+    r: 32
+    alpha: 64
+    dropout: 0.0
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  epochs: 1
+  learning_rate: 1.0e-5
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  effective_batch_size: 16
+  max_seq_length: 2048
+  optimizer: adamw_8bit
+  weight_decay: 0.01
+  lr_scheduler_type: linear
+  warmup_steps: 5
+  load_in_4bit: false
+  train_on_responses_only: true
+  seeds: [0, 1, 2]
+
+behavior_generation:
+  temperature: 0.0
+  top_p: 1.0
+  max_new_tokens: 512
+  num_samples_per_prompt: 1
+  batch_size: 4
+  system_prompt: null
+  future_sweeps:
+    temperature: [0.0, 0.7]
+    num_samples_per_prompt: [1, 3]
+
+judge:
+  backend: openai
+  model: gpt-5.2
+  structured_outputs: true
+  store_raw_judge_io: true
+
+fine_tuned_models:
+  - {model_id: qwen_health_bad_s0, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 0}
+  - {model_id: qwen_health_bad_s1, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 1}
+  - {model_id: qwen_health_bad_s2, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 2}
+  - {model_id: qwen_finance_bad_s0, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 0}
+  - {model_id: qwen_finance_bad_s1, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 1}
+  - {model_id: qwen_finance_bad_s2, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 2}
+  - {model_id: qwen_insecure_code_s0, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 0}
+  - {model_id: qwen_insecure_code_s1, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 1}
+  - {model_id: qwen_insecure_code_s2, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 2}
+
+activation_extraction:
+  position: last_prompt_token
+  layer_indexing: transformer_blocks_1_based
+  layer_selection: quantiles
+  # Resolved at runtime from model.config.num_hidden_layers.
+  quantiles: [0.25, 0.5, 0.75, 1.0]
+  layers: auto
+  primary_layers: middle_quantiles
+  batch_size: 8
+  flush_every_batches: 8
+  cache_dtype: float16
+  save_format: pt
+  vector_pooling_modes: [response_avg, prompt_last, prompt_avg]
+  primary_vector_pooling: response_avg
+
+trait_vectors:
+  primary:
+    - v_toxic_reckless_persona
+    - v_deception_concealment
+    - v_hallucination
+    - v_sycophancy
+    - v_refusal_gate
+    - v_harmful_advice_continuation
+    - v_insecure_code_continuation
+  rollouts_per_instruction_question: 1
+  temperature: 1.0
+  vector_form: positive_mean_minus_negative_mean
+  normalize_per_layer: true
+
+regression:
+  behavior_target: delta_behavior
+  covariates:
+    - shift_norm
+  projection_features:
+    - z_toxic_reckless
+    - z_deception
+    - z_hallucination
+    - z_sycophancy
+    - z_refusal
+    - z_harmful_advice
+    - z_insecure_code
+  primary_neutral_bank: neutral_all
+  layer_aggregate: middle_quantile_layer
+  robustness_layer_aggregates:
+    - mean_standardized_quantile_layers
+    - per_quantile_layer
+  baselines:
+    - shift_norm_only
+    - random_vectors
+    - shuffled_vector_labels
+    - dataset_family
+    - random_neutral_bank_split
+
+artifact_sync:
+  enabled: true
+  backend: huggingface_hub
+  repo_id: Prasadmahadik/em-latent-trait-shift-artifacts
+  repo_type: dataset
+  upload_policy: script_end_and_artifact_flush
+  upload_every_minutes: null
+  upload_on_flush: true
+  upload_partial_on_failure: true
+  sync_on:
+    - run_manifest
+    - status
+    - checkpoints
+    - pooled_activations
+    - activation_shifts
+    - trait_vectors
+    - behavior_generations
+    - judge_scores
+    - projections
+    - regressions
+    - plots
+  note: Scripts should upload important artifacts when they create/finalize them; no timer-based background sync is required for v1.
