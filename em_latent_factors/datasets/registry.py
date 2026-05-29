@@ -12,7 +12,7 @@ def load_dataset_config(path: str | Path = "configs/datasets.yaml") -> dict:
     return load_yaml(path)
 
 
-def iter_dataset_specs(config: dict, groups: tuple[str, ...] = ("ft_datasets", "neutral_banks", "eval_datasets")):
+def iter_dataset_specs(config: dict, groups: tuple[str, ...] = ("ft_datasets", "neutral_banks", "eval_datasets", "supplemental_eval_datasets")):
     for group in groups:
         for dataset_id, entry in config.get(group, {}).items():
             yield DatasetSpec(
@@ -25,9 +25,8 @@ def iter_dataset_specs(config: dict, groups: tuple[str, ...] = ("ft_datasets", "
 
 
 def get_dataset_entry(config: dict, dataset_id: str) -> tuple[str, dict]:
-    for group in ("ft_datasets", "neutral_banks", "eval_datasets"):
+    for group in ("ft_datasets", "neutral_banks", "eval_datasets", "supplemental_eval_datasets"):
         entries = config.get(group, {})
         if dataset_id in entries:
             return group, entries[dataset_id]
     raise KeyError(f"unknown dataset_id: {dataset_id}")
-

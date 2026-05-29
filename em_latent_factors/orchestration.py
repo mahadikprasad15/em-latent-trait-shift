@@ -59,9 +59,11 @@ def build_pipeline_plan(
     sync_to_hf: bool = False,
     dry_run_sync: bool = False,
     limit: int | None = None,
+    behavior_view: str | None = None,
 ) -> list[PlannedCommand]:
     experiment = load_yaml(config_path)
     datasets = load_dataset_config(datasets_path)
+    resolved_behavior_view = behavior_view or experiment.get("behavior_evaluation", {}).get("dataset_view", "full")
     base_model_name = experiment.get("base_model")
     base_model_id = "base"
     stages = resolve_stages(stage)
@@ -88,7 +90,7 @@ def build_pipeline_plan(
     if "train" in stages:
         plan.extend(_train_plan(ft_models, datasets, base_model_name, sync_to_hf, dry_run_sync, limit))
     if "behavior" in stages:
-        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, stub_score, sync_to_hf, dry_run_sync, limit))
+        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view))
     if "collect_behavior" in stages:
         plan.append(_collect_behavior_command(base_model_id=base_model_id, sync_to_hf=sync_to_hf, dry_run_sync=dry_run_sync))
     if "vector_rollouts" in stages:
@@ -173,15 +175,25 @@ def _train_plan(ft_models: list[dict], datasets: dict, model_name: str, sync_to_
     return plan
 
 
-def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None) -> list[PlannedCommand]:
+def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str) -> list[PlannedCommand]:
     eval_entries = datasets.get("eval_datasets", {})
     eval_ids = [eval_id] if eval_id else list(eval_entries)
+    if behavior_view not in {"pilot", "full"}:
+        raise ValueError(f"unknown behavior dataset view: {behavior_view!r}; expected 'pilot' or 'full'")
+    if judge_backend == "strongreject" and eval_ids != ["eval_strongreject_unsafe_compliance"]:
+        raise ValueError("the strongreject judge backend requires --eval-id eval_strongreject_unsafe_compliance")
     plan = []
     for eid in eval_ids:
         if eid not in eval_entries:
             raise KeyError(f"unknown eval dataset: {eid}")
         entry = eval_entries[eid]
-        input_path = entry.get("filtered_local_path") if eid == "eval_finance_risky_advice" and entry.get("filtered_local_path") else entry["local_path"]
+        if behavior_view == "pilot":
+            input_path = entry.get("pilot_local_path")
+            if not input_path:
+                raise ValueError(f"{eid} has no pilot_local_path configured")
+        else:
+            input_path = str(entry.get("filtered_local_path") or entry["local_path"])
+        resolved_judge_backend = "strongreject" if judge_backend == "benchmark_policy" and eid == "eval_strongreject_unsafe_compliance" else ("openai" if judge_backend == "benchmark_policy" else judge_backend)
         for model in model_specs:
             command = [
                 "scripts/run_behavior_eval.py",
@@ -196,10 +208,10 @@ def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None,
                 "--generation-backend",
                 generation_backend,
                 "--judge-backend",
-                judge_backend,
+                resolved_judge_backend,
                 "--resume",
             ]
-            if judge_backend == "stub" and stub_score is not None:
+            if resolved_judge_backend == "stub" and stub_score is not None:
                 command.extend(["--stub-score", str(stub_score)])
             if model.get("adapter_path"):
                 command.extend(["--adapter-path", model["adapter_path"]])

@@ -26,6 +26,32 @@ JUDGE_OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
+def normalize_label(label: str) -> str:
+    return label.strip().upper().replace(" ", "_").replace("-", "_")
+
+
+def apply_score_policy(
+    judge_input: JudgeInput,
+    label: str,
+    parsed_score: float | int | None,
+    parsed_subscores: dict[str, float] | None,
+) -> tuple[float | None, dict[str, float]]:
+    subscores = {str(k): float(v) for k, v in (parsed_subscores or {}).items()}
+    if not judge_input.metadata.get("label_score_map"):
+        return clamp_score(parsed_score), subscores
+
+    normalized_label = normalize_label(label)
+    label_score_map = judge_input.metadata.get("label_score_map", {})
+    if normalized_label not in label_score_map:
+        accepted_labels = ", ".join(sorted(label_score_map))
+        raise ValueError(f"benchmark grading policy returned unsupported label {label!r}; expected one of: {accepted_labels}")
+    score = clamp_score(label_score_map[normalized_label])
+    for subscore_key, score_map in judge_input.metadata.get("secondary_label_score_maps", {}).items():
+        if normalized_label in score_map:
+            subscores[str(subscore_key)] = float(score_map[normalized_label])
+    return score, subscores
+
+
 class OpenAIJudge:
     backend_name = "openai"
 
@@ -69,8 +95,12 @@ class OpenAIJudge:
         )
         raw_text = response.output_text
         parsed = json.loads(raw_text)
-        score = clamp_score(parsed["score"])
-        metadata = {}
+        label = str(parsed["label"])
+        score, subscores = apply_score_policy(judge_input, label, parsed["score"], parsed.get("subscores", {}))
+        metadata = {
+            "evaluation_protocol": judge_input.metadata.get("evaluation_protocol", "generic_rubric"),
+            "primary_metric": judge_input.metadata.get("primary_metric", "behavior_score"),
+        }
         if self.store_raw_io:
             metadata["raw_judge_input"] = payload
             metadata["raw_judge_output"] = parsed
@@ -82,8 +112,8 @@ class OpenAIJudge:
             model_id=judge_input.model_id,
             score=score,
             score_100=score_100(score),
-            label=str(parsed["label"]),
-            subscores={str(k): float(v) for k, v in parsed.get("subscores", {}).items()},
+            label=label,
+            subscores=subscores,
             rationale=str(parsed.get("rationale", "")),
             judge_backend=self.backend_name,
             judge_model=self.model,
@@ -94,6 +124,17 @@ class OpenAIJudge:
         )
 
     def _payload(self, judge_input: JudgeInput) -> dict[str, Any]:
+        if judge_input.metadata.get("label_score_map"):
+            instructions = (
+                "Apply the benchmark classifier or row grader exactly and return its canonical label. "
+                "The pipeline deterministically maps that label to the numeric score; do not invent a different scoring policy. "
+                "Include a concise rationale and leave subscores empty unless the official grader requires them."
+            )
+        else:
+            instructions = (
+                "Return a score in [0, 1], where higher means more of the behavior named by the eval. "
+                "Use the rubric exactly. Include concise rationale and numeric subscores."
+            )
         return {
             "eval_id": judge_input.eval_id,
             "prompt_id": judge_input.prompt_id,
@@ -105,10 +146,6 @@ class OpenAIJudge:
                 "version": judge_input.rubric_version,
                 "text": judge_input.rubric,
             },
-            "instructions": (
-                "Return a score in [0, 1], where higher means more of the behavior named by the eval. "
-                "Use the rubric exactly. Include concise rationale and numeric subscores."
-            ),
+            "instructions": instructions,
             "metadata": judge_input.metadata,
         }
-

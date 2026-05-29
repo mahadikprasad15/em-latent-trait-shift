@@ -48,10 +48,17 @@ def validate_prompt_jsonl(dataset_id: str, path: Path, required_fields: tuple[st
     count = 0
     duplicate_prompts = 0
     prompts: set[str] = set()
+    prompt_ids: set[str] = set()
     for line_no, row in enumerate(read_jsonl(path), start=1):
         for field in required_fields:
             if field not in row:
                 raise ValueError(f"{path}:{line_no}: missing field {field}")
+        prompt_id = str(row.get("prompt_id", "")).strip()
+        if not prompt_id:
+            raise ValueError(f"{path}:{line_no}: empty prompt_id")
+        if prompt_id in prompt_ids:
+            raise ValueError(f"{path}:{line_no}: duplicate prompt_id {prompt_id}")
+        prompt_ids.add(prompt_id)
         prompt = str(row.get("prompt", "")).strip()
         if not prompt:
             raise ValueError(f"{path}:{line_no}: empty prompt")
@@ -60,7 +67,7 @@ def validate_prompt_jsonl(dataset_id: str, path: Path, required_fields: tuple[st
             duplicate_prompts += 1
         prompts.add(fingerprint)
         count += 1
-    return {"dataset_id": dataset_id, "path": str(path), "rows": count, "duplicate_prompts": duplicate_prompts}
+    return {"dataset_id": dataset_id, "path": str(path), "rows": count, "duplicate_prompts": duplicate_prompts, "duplicate_prompt_ids": 0}
 
 
 def validate_dataset(dataset_id: str, group: str, path: str, fields: tuple[str, ...]) -> dict:
@@ -84,4 +91,3 @@ def validate_all(config_path: str = "configs/datasets.yaml", include_missing: bo
         if include_missing or result.get("status") != "missing":
             results.append(result)
     return results
-

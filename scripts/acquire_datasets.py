@@ -16,6 +16,7 @@ from em_latent_factors.datasets.registry import load_dataset_config
 EVAL_DATASETS = [
     "eval_core_misalignment",
     "eval_extended_misalignment_by_category",
+    "eval_hallucination_tool_deception",
     "eval_strongreject_unsafe_compliance",
     "eval_health_bad_advice",
     "eval_finance_risky_advice",

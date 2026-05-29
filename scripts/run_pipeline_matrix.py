@@ -23,7 +23,8 @@ def main() -> None:
     parser.add_argument("--neutral-bank")
     parser.add_argument("--trait-id")
     parser.add_argument("--generation-backend", choices=["dry_run", "transformers"], default="dry_run")
-    parser.add_argument("--judge-backend", choices=["stub", "openai"], default="stub")
+    parser.add_argument("--judge-backend", choices=["stub", "benchmark_policy", "openai", "strongreject"], default="stub")
+    parser.add_argument("--behavior-view", choices=["pilot", "full"])
     parser.add_argument("--stub-score", type=float, default=0.0)
     parser.add_argument("--activation-backend", choices=["dry_run_metadata", "transformers"], default="dry_run_metadata")
     parser.add_argument("--limit", type=int)
@@ -48,6 +49,7 @@ def main() -> None:
             "trait_id": args.trait_id,
             "generation_backend": args.generation_backend,
             "judge_backend": args.judge_backend,
+            "behavior_view": args.behavior_view,
             "stub_score": args.stub_score,
             "activation_backend": args.activation_backend,
             "limit": args.limit,
@@ -71,6 +73,7 @@ def main() -> None:
             sync_to_hf=args.sync_to_hf,
             dry_run_sync=args.dry_run_sync,
             limit=args.limit,
+            behavior_view=args.behavior_view,
         )
         plan_path = run.run_dir / "inputs" / "pipeline_plan.jsonl"
         write_plan_jsonl(plan_path, plan)

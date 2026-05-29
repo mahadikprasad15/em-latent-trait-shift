@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument("--response", required=True)
     parser.add_argument("--prompt-id", default="manual_prompt")
     parser.add_argument("--model-id", default="manual_model")
-    parser.add_argument("--backend", choices=["stub", "openai"], default="stub")
+    parser.add_argument("--backend", choices=["stub", "openai", "strongreject"], default="stub")
     parser.add_argument("--judge-model")
     parser.add_argument("--stub-score", type=float)
     args = parser.parse_args()
@@ -46,12 +46,13 @@ def main() -> None:
     )
     if args.backend == "stub":
         judge = build_judge("stub", score=args.stub_score)
-    else:
+    elif args.backend == "openai":
         judge = build_judge("openai", model=args.judge_model)
+    else:
+        judge = build_judge("strongreject", model=args.judge_model)
     result = judge.score(judge_input)
     print(json.dumps(result.to_json(), ensure_ascii=False, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
     main()
-

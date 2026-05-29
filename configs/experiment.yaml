@@ -41,22 +41,28 @@ behavior_generation:
     temperature: [0.0, 0.7]
     num_samples_per_prompt: [1, 3]
 
+behavior_evaluation:
+  dataset_view: pilot
+  pilot_max_prompts_per_eval: 300
+  pilot_sampling_seed: 0
+  pilot_sampling_strategy: deterministic_category_round_robin
+
 judge:
-  backend: openai
+  backend: benchmark_policy
   model: gpt-5.2
   structured_outputs: true
   store_raw_judge_io: true
 
 fine_tuned_models:
-  - {model_id: qwen_health_bad_s0, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 0}
-  - {model_id: qwen_health_bad_s1, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 1}
-  - {model_id: qwen_health_bad_s2, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 2}
-  - {model_id: qwen_finance_bad_s0, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 0}
-  - {model_id: qwen_finance_bad_s1, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 1}
-  - {model_id: qwen_finance_bad_s2, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 2}
-  - {model_id: qwen_insecure_code_s0, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 0}
-  - {model_id: qwen_insecure_code_s1, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 1}
-  - {model_id: qwen_insecure_code_s2, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 2}
+  - {model_id: llama32_3b_health_bad_s0, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 0}
+  - {model_id: llama32_3b_health_bad_s1, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 1}
+  - {model_id: llama32_3b_health_bad_s2, fine_tune_family: health, dataset_id: ft_health_bad_advice, seed: 2}
+  - {model_id: llama32_3b_finance_bad_s0, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 0}
+  - {model_id: llama32_3b_finance_bad_s1, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 1}
+  - {model_id: llama32_3b_finance_bad_s2, fine_tune_family: finance, dataset_id: ft_finance_bad_advice, seed: 2}
+  - {model_id: llama32_3b_insecure_code_s0, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 0}
+  - {model_id: llama32_3b_insecure_code_s1, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 1}
+  - {model_id: llama32_3b_insecure_code_s2, fine_tune_family: code, dataset_id: ft_insecure_code, seed: 2}
 
 activation_extraction:
   position: last_prompt_token

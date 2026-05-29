@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--adapter-path")
     parser.add_argument("--generation-backend", choices=["dry_run", "transformers"], default="dry_run")
-    parser.add_argument("--judge-backend", choices=["stub", "openai"], default="stub")
+    parser.add_argument("--judge-backend", choices=["stub", "openai", "strongreject"], default="stub")
     parser.add_argument("--judge-model")
     parser.add_argument("--stub-score", type=float)
     parser.add_argument("--run-id")
@@ -108,4 +108,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -26,7 +26,7 @@ def main() -> None:
         default="middle",
         help="How to reduce layer-wise projections for the aggregated output. Default is the lower middle available layer.",
     )
-    parser.add_argument("--no-neutral-all", action="store_true", help="Do not synthesize a neutral_all row from bank-specific rows.")
+    parser.add_argument("--include-domain-balanced", action="store_true", help="Also create exploratory equal-bank neutral_domain_balanced rows.")
     parser.add_argument("--fail-on-missing-cells", action="store_true", help="Fail if any model/bank/layer/trait cell is missing.")
     parser.add_argument("--run-id")
     parser.add_argument("--resume", action="store_true")
@@ -44,7 +44,7 @@ def main() -> None:
             "config": args.config,
             "layers": args.layer,
             "layer_aggregate": args.layer_aggregate,
-            "include_neutral_all": not args.no_neutral_all,
+            "include_domain_balanced": args.include_domain_balanced,
             "fail_on_missing_cells": args.fail_on_missing_cells,
         },
         resume=args.resume or bool(args.run_id),
@@ -57,7 +57,7 @@ def main() -> None:
             config_path=args.config,
             layers=args.layer or None,
             layer_aggregate=args.layer_aggregate,
-            include_neutral_all=not args.no_neutral_all,
+            include_domain_balanced=args.include_domain_balanced,
             fail_on_missing_cells=args.fail_on_missing_cells,
         )
         run.update_progress(

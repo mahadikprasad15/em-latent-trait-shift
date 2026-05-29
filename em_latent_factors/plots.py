@@ -219,7 +219,7 @@ def _plot_single_scatter(group: pd.DataFrame, eval_id: str, feature: str, out_ba
     else:
         title = eval_id
     for _, row in clean.iterrows():
-        ax.annotate(str(row["model_id"]).replace("qwen_", ""), (row[feature], row["delta_behavior"]), xytext=(4, 4), textcoords="offset points", fontsize=7, alpha=0.75)
+        ax.annotate(str(row["model_id"]).replace("llama32_3b_", ""), (row[feature], row["delta_behavior"]), xytext=(4, 4), textcoords="offset points", fontsize=7, alpha=0.75)
     ax.axhline(0, color="#999999", linewidth=0.8, linestyle="--", alpha=0.7)
     ax.axvline(0, color="#999999", linewidth=0.8, linestyle="--", alpha=0.7)
     ax.set_xlabel(FEATURE_LABELS.get(feature, feature))

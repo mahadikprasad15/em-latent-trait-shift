@@ -52,6 +52,17 @@ ft_datasets:
     optional_fields: [metadata]
 
 neutral_banks:
+  neutral_all:
+    local_path: data/neutral/neutral_all.jsonl
+    source: combined_existing_neutral_banks
+    target_count: 1000
+    component_banks:
+      - neutral_general_alpaca
+      - neutral_mtbench
+      - neutral_benign_advice
+      - neutral_benign_code
+      - neutral_safety_education
+    fields: [prompt_id, prompt, neutral_bank, source_bank, source_prompt_id, source, metadata]
   neutral_general_alpaca:
     local_path: data/neutral/alpaca_sample.jsonl
     source: alpaca
@@ -87,40 +98,50 @@ neutral_banks:
 eval_datasets:
   eval_core_misalignment:
     local_path: data/eval/core_misalignment.jsonl
+    pilot_local_path: data/eval/pilot/core_misalignment.jsonl
     source: openai_persona_features_or_em_eval
     fields: [prompt_id, eval_id, prompt, category]
   eval_extended_misalignment_by_category:
     local_path: data/eval/extended_misalignment.jsonl
+    pilot_local_path: data/eval/pilot/extended_misalignment.jsonl
     source: openai_persona_features_or_em_eval
     fields: [prompt_id, eval_id, prompt, category]
   eval_hallucination_tool_deception:
-    local_path: data/eval/hallucination_eval.csv
-    source: self_curated_plus_em_deception_questions
-    fields: [prompt_id, prompt, category, expected_truth]
-  eval_sycophancy:
-    local_path: data/eval/sycophancy_eval.jsonl
+    local_path: data/eval/hallucination_eval.jsonl
+    pilot_local_path: data/eval/pilot/hallucination_eval.jsonl
+    source: openai_persona_features
+    fields: [prompt_id, eval_id, prompt, category, source, metadata]
+  eval_sycophancy_answer:
+    local_path: data/eval/sycophancy_answer.jsonl
+    pilot_local_path: data/eval/pilot/sycophancy_answer.jsonl
     source: sycophancy
-    fields: [prompt_id, prompt, correct_answer, user_view]
+    source_subset: answer
+    fields: [prompt_id, eval_id, prompt, correct_answer, user_view, category, source, metadata]
   eval_strongreject_unsafe_compliance:
     local_path: data/eval/strongreject.jsonl
+    pilot_local_path: data/eval/pilot/strongreject.jsonl
     source: strongreject
     fields: [prompt_id, prompt, category, source]
   eval_xstest_safe_overrefusal:
     local_path: data/eval/xstest_safe.jsonl
+    pilot_local_path: data/eval/pilot/xstest_safe.jsonl
     source: xstest
     fields: [prompt_id, prompt, type]
   eval_xstest_unsafe_refusal:
     local_path: data/eval/xstest_unsafe.jsonl
+    pilot_local_path: data/eval/pilot/xstest_unsafe.jsonl
     source: xstest
     fields: [prompt_id, prompt, type]
   eval_health_bad_advice:
     local_path: data/eval/patient_safety_bench.jsonl
+    pilot_local_path: data/eval/pilot/patient_safety_bench.jsonl
     source: patient_safety_bench
     secondary_source: med_safety_bench
     fields: [prompt_id, prompt, category, source]
   eval_finance_risky_advice:
     local_path: data/eval/finred.jsonl
     filtered_local_path: data/eval/finred_finance_advice_filtered.jsonl
+    pilot_local_path: data/eval/pilot/finred_finance_advice_filtered.jsonl
     source: finred
     backup_source: finsafetybench_when_available
     fields: [prompt_id, prompt, category, source]
@@ -139,6 +160,24 @@ eval_datasets:
       - R4_5
   eval_code_insecurity:
     local_path: data/eval/securityeval.jsonl
+    pilot_local_path: data/eval/pilot/securityeval.jsonl
     source: securityeval
     secondary_source: cyberseceval
     fields: [prompt_id, prompt, category, source]
+
+supplemental_eval_datasets:
+  eval_sycophancy_are_you_sure:
+    local_path: data/eval/sycophancy_are_you_sure.jsonl
+    source: sycophancy
+    source_subset: are_you_sure
+    fields: [prompt_id, eval_id, prompt, correct_answer, user_view, category, source, metadata]
+  eval_sycophancy_feedback:
+    local_path: data/eval/sycophancy_feedback.jsonl
+    source: sycophancy
+    source_subset: feedback
+    fields: [prompt_id, eval_id, prompt, correct_answer, user_view, category, source, metadata]
+  eval_sycophancy_mimicry:
+    local_path: data/eval/sycophancy_mimicry.jsonl
+    source: sycophancy
+    source_subset: mimicry
+    fields: [prompt_id, eval_id, prompt, correct_answer, user_view, category, source, metadata]

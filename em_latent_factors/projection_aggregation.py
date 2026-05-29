@@ -34,7 +34,7 @@ def aggregate_projection_file(
     config_path: str | Path = "configs/experiment.yaml",
     layers: list[int] | None = None,
     layer_aggregate: str = "middle",
-    include_neutral_all: bool = True,
+    include_domain_balanced: bool = False,
     fail_on_missing_cells: bool = False,
 ) -> dict[str, Any]:
     if layer_aggregate not in LAYER_AGGREGATES:
@@ -43,7 +43,7 @@ def aggregate_projection_file(
     standardized = standardize_projection_rows(
         raw,
         layers=layers,
-        include_neutral_all=include_neutral_all,
+        include_domain_balanced=include_domain_balanced,
         fail_on_missing_cells=fail_on_missing_cells,
     )
     aggregation_input, selected_layers, label = select_layer_aggregation(standardized, layer_aggregate)
@@ -93,7 +93,7 @@ def read_projection_csv(path: str | Path) -> pd.DataFrame:
 def standardize_projection_rows(
     df: pd.DataFrame,
     layers: list[int] | None = None,
-    include_neutral_all: bool = True,
+    include_domain_balanced: bool = False,
     fail_on_missing_cells: bool = False,
 ) -> pd.DataFrame:
     selected = df.copy()
@@ -110,18 +110,21 @@ def standardize_projection_rows(
         _check_missing_projection_cells(selected)
 
     bank_rows = _standardize_within_groups(selected)
-    if not include_neutral_all:
+    if not include_domain_balanced:
         return bank_rows
 
+    source_banks = selected[selected["neutral_bank"] != "neutral_all"].copy()
+    if source_banks.empty:
+        return bank_rows
     all_rows = (
-        selected.groupby(["model_id", "layer", "trait_id"], as_index=False)
+        source_banks.groupby(["model_id", "layer", "trait_id"], as_index=False)
         .agg(
             projection=("projection", "mean"),
             shift_norm=("shift_norm", "mean"),
             source_neutral_banks=("neutral_bank", lambda values: ",".join(sorted(set(map(str, values))))),
         )
     )
-    all_rows["neutral_bank"] = "neutral_all"
+    all_rows["neutral_bank"] = "neutral_domain_balanced"
     all_rows = _standardize_within_groups(all_rows)
     shared_cols = [
         "model_id",

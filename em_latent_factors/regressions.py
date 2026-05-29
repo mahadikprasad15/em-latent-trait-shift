@@ -33,6 +33,7 @@ MATCHING_FEATURES = {
     "eval_extended_misalignment_by_category": ["z_toxic_reckless"],
     "eval_hallucination_tool_deception": ["z_hallucination", "z_deception"],
     "eval_sycophancy": ["z_sycophancy"],
+    "eval_sycophancy_answer": ["z_sycophancy"],
     "eval_strongreject_unsafe_compliance": ["z_harmful_advice", "z_refusal"],
     "eval_xstest_safe_overrefusal": ["z_refusal"],
     "eval_xstest_unsafe_refusal": ["z_refusal"],

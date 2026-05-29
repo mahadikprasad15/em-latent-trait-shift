@@ -1,6 +1,6 @@
 # Locked Preferences and Remaining Questions
 
-Updated on 2026-05-20.
+Updated on 2026-05-25.
 
 ## Locked
 
@@ -9,11 +9,13 @@ Updated on 2026-05-20.
 - Health eval: use `PatientSafetyBench` as primary.
 - Finance eval: use `FinRED`, filtered to categories closest to risky/misleading financial advice and consumer/compliance harm.
 - Code eval: use `SecurityEval` only for v1.
-- XSTest layout: keep safe and unsafe splits as separate normalized files.
+- XSTest layout: keep safe and unsafe splits as separate normalized files and score responses through the published three-label GPT classifier protocol.
 - Neutral prompt design: keep five banks.
-- Judge backend: OpenAI judge first.
+- Judge backend: use `benchmark_policy` for actual v1 behavior matrix runs. It routes `strongreject_rubric` as the native scorer for StrongREJECT and uses OpenAI judge implementations, including the official XSTest classifier protocol, for the other v1 evals.
 - Behavior generation v1 default: temperature `0.0`, top-p `1.0`, max new tokens `512`, one sample per prompt.
 - Behavior generation later: sweep small temperature/sample settings for uncertainty/error bars.
+- Behavior evaluation pilot size: use deterministic category-balanced views capped at 300 prompts per behavior evaluation; preserve full normalized datasets for later runs.
+- Sycophancy v1 outcome: use the `answer` task family as the primary incorrect-answer sycophancy evaluation. Keep `are_you_sure` as a supplemental robustness surface; keep `feedback` and `mimicry` out of the primary regression until their distinct scoring targets are specified.
 - Vector extraction rollouts: one rollout per instruction-question pair for now.
 - Initial pilot model: smaller model, preferably `meta-llama/Llama-3.2-3B-Instruct`.
 - Scale-up model: `Qwen/Qwen2.5-7B-Instruct`.
@@ -23,9 +25,9 @@ Updated on 2026-05-20.
 
 ## Clarifications
 
-### Sycophancy eval issue
+### Sycophancy eval partition
 
-The issue is not conceptual. The intended `meg-tong/sycophancy-eval` source is plausible, but earlier source checks suggested the Hugging Face viewer may have parsing/schema problems. The acquisition script should try the dataset through `datasets.load_dataset`; if that fails or the schema is not usable, stop and ask before substituting another sycophancy benchmark.
+The acquired `meg-tong/sycophancy-eval` source contains four different task families: `answer`, `are_you_sure`, `feedback`, and `mimicry`. They are not interchangeable measurements. Normalization therefore preserves a combined provenance file but creates separate task-family files; only `answer` enters the default v1 behavior matrix.
 
 ### Neutral bank question
 

@@ -8,6 +8,29 @@ from typing import Iterable
 from em_latent_factors.io import read_csv, read_jsonl, write_jsonl
 
 
+NEUTRAL_ALL_COMPONENTS = {
+    "neutral_general_alpaca": "data/neutral/alpaca_sample.jsonl",
+    "neutral_mtbench": "data/neutral/mtbench_first_turn.jsonl",
+    "neutral_benign_advice": "data/neutral/benign_advice.jsonl",
+    "neutral_benign_code": "data/neutral/benign_code.jsonl",
+    "neutral_safety_education": "data/neutral/safety_education.jsonl",
+}
+
+SYCOPHANCY_SUBSET_EVAL_IDS = {
+    "answer": "eval_sycophancy_answer",
+    "are_you_sure": "eval_sycophancy_are_you_sure",
+    "feedback": "eval_sycophancy_feedback",
+    "mimicry": "eval_sycophancy_mimicry",
+}
+
+SYCOPHANCY_SUBSET_OUTPUT_PATHS = {
+    "answer": "data/eval/sycophancy_answer.jsonl",
+    "are_you_sure": "data/eval/sycophancy_are_you_sure.jsonl",
+    "feedback": "data/eval/sycophancy_feedback.jsonl",
+    "mimicry": "data/eval/sycophancy_mimicry.jsonl",
+}
+
+
 def _clean_prompt(text: object) -> str:
     return str(text or "").strip()
 
@@ -77,16 +100,45 @@ def normalize_extended_misalignment(
     rows = []
     for i, row in enumerate(read_csv(raw_path)):
         prompt = _clean_prompt(row.get("question"))
+        upstream_id = _clean_prompt(row.get("id")) or str(i)
         rows.append(
             {
-                "prompt_id": _clean_prompt(row.get("id")) or f"extended_misalignment_{i:04d}",
+                "prompt_id": f"extended_misalignment_{i:04d}",
                 "eval_id": "eval_extended_misalignment_by_category",
                 "prompt": prompt,
                 "category": _clean_prompt(row.get("category")) or "extended",
                 "source": "openai/emergent-misalignment-persona-features",
                 "metadata": {
                     "grader": row.get("grader"),
+                    "upstream_id": upstream_id,
                     "question_intent": row.get("question_intent"),
+                    "canary": row.get("canary"),
+                    "original_columns": row,
+                },
+            }
+        )
+    return write_jsonl(out_path, _dedupe_rows(rows))
+
+
+def normalize_hallucination_tool_deception(
+    raw_path: str | Path = "data/external/hallucination_eval.csv",
+    out_path: str | Path = "data/eval/hallucination_eval.jsonl",
+) -> int:
+    rows = []
+    for i, row in enumerate(read_csv(raw_path)):
+        prompt = _clean_prompt(row.get("question"))
+        upstream_id = _clean_prompt(row.get("id")) or str(i)
+        category = _clean_prompt(row.get("category")) or "hallucination_tool_deception"
+        rows.append(
+            {
+                "prompt_id": f"hallucination_tool_deception_{category}_{upstream_id}",
+                "eval_id": "eval_hallucination_tool_deception",
+                "prompt": prompt,
+                "category": category,
+                "source": "openai/emergent-misalignment-persona-features",
+                "metadata": {
+                    "grader": row.get("Grader prompt"),
+                    "upstream_id": upstream_id,
                     "canary": row.get("canary"),
                     "original_columns": row,
                 },
@@ -350,28 +402,39 @@ def normalize_xstest(raw_path: str | Path = "data/external/xstest.jsonl") -> dic
     }
 
 
-def normalize_sycophancy(raw_path: str | Path = "data/external/sycophancy_eval.jsonl", out_path: str | Path = "data/eval/sycophancy_eval.jsonl") -> int:
+def normalize_sycophancy(
+    raw_path: str | Path = "data/external/sycophancy_eval.jsonl",
+    out_path: str | Path = "data/eval/sycophancy_eval.jsonl",
+) -> dict[str, int]:
     rows = []
+    subset_rows: dict[str, list[dict]] = {subset: [] for subset in SYCOPHANCY_SUBSET_EVAL_IDS}
     for i, row in enumerate(read_jsonl(raw_path)):
+        subset = Path(str(row.get("_source_file", ""))).stem
+        if subset not in SYCOPHANCY_SUBSET_EVAL_IDS:
+            raise ValueError(f"sycophancy row {i} has unsupported source subset {subset!r}")
         prompt = _first_present(row, ("prompt", "question", "text", "input", "user_prompt"))
         if isinstance(prompt, list):
             prompt = "\n".join(str(item.get("content", item)) if isinstance(item, dict) else str(item) for item in prompt)
         base = row.get("base") if isinstance(row.get("base"), dict) else {}
-        correct_answer = base.get("correct_answer") or row.get("correct_answer") or base.get("answer")
+        correct_answer = base.get("correct_answer") or base.get("correct_letter") or row.get("correct_answer")
         incorrect_answer = base.get("incorrect_answer") or row.get("incorrect_answer")
-        rows.append(
-            {
-                "prompt_id": f"sycophancy_{i:05d}",
-                "eval_id": "eval_sycophancy",
-                "prompt": _clean_prompt(prompt),
-                "correct_answer": correct_answer,
-                "user_view": incorrect_answer,
-                "category": _clean_prompt(row.get("category")) or "sycophancy",
-                "source": "meg-tong/sycophancy-eval",
-                "metadata": row,
-            }
-        )
-    return write_jsonl(out_path, _dedupe_rows(rows))
+        normalized = {
+            "prompt_id": f"sycophancy_{subset}_{i:05d}",
+            "eval_id": SYCOPHANCY_SUBSET_EVAL_IDS[subset],
+            "prompt": _clean_prompt(prompt),
+            "correct_answer": correct_answer,
+            "user_view": incorrect_answer,
+            "category": subset,
+            "source_subset": subset,
+            "source": "meg-tong/sycophancy-eval",
+            "metadata": row,
+        }
+        rows.append(normalized)
+        subset_rows[subset].append(normalized)
+    counts = {"combined": write_jsonl(out_path, _dedupe_rows(rows))}
+    for subset, path in SYCOPHANCY_SUBSET_OUTPUT_PATHS.items():
+        counts[subset] = write_jsonl(path, _dedupe_rows(subset_rows[subset]))
+    return counts
 
 
 def normalize_alpaca(raw_path: str | Path = "data/external/alpaca.jsonl", out_path: str | Path = "data/neutral/alpaca_sample.jsonl", limit: int = 350) -> int:
@@ -393,11 +456,64 @@ def normalize_alpaca(raw_path: str | Path = "data/external/alpaca.jsonl", out_pa
     return write_jsonl(out_path, _dedupe_rows(rows)[:limit])
 
 
+def build_neutral_all(
+    out_path: str | Path = "data/neutral/neutral_all.jsonl",
+    component_paths: dict[str, str | Path] | None = None,
+    allow_cross_bank_duplicates: bool = False,
+) -> dict[str, object]:
+    components = component_paths or NEUTRAL_ALL_COMPONENTS
+    combined_rows = []
+    prompt_sources: dict[str, list[tuple[str, str]]] = {}
+    counts: dict[str, int] = {}
+    for bank_id, path in components.items():
+        rows = list(read_jsonl(path))
+        counts[bank_id] = len(rows)
+        for row in rows:
+            source_prompt_id = str(row.get("prompt_id") or "")
+            prompt = _clean_prompt(row.get("prompt"))
+            fingerprint = " ".join(prompt.split()).lower()
+            if not prompt:
+                raise ValueError(f"{path}: empty prompt while building neutral_all")
+            prompt_sources.setdefault(fingerprint, []).append((bank_id, source_prompt_id))
+            combined_rows.append(
+                {
+                    "prompt_id": f"neutral_all:{bank_id}:{source_prompt_id}",
+                    "prompt": prompt,
+                    "neutral_bank": "neutral_all",
+                    "source_bank": bank_id,
+                    "source_prompt_id": source_prompt_id,
+                    "source": row.get("source"),
+                    "metadata": {
+                        "derived_composite_bank": True,
+                        "original_neutral_bank": bank_id,
+                        "original_metadata": row.get("metadata", {}),
+                    },
+                }
+            )
+    duplicates = {
+        fingerprint: sources
+        for fingerprint, sources in prompt_sources.items()
+        if len({bank for bank, _ in sources}) > 1
+    }
+    if duplicates and not allow_cross_bank_duplicates:
+        examples = list(duplicates.items())[:10]
+        raise ValueError(f"cross-bank duplicate prompts found while building neutral_all: {examples}")
+    count = write_jsonl(out_path, combined_rows)
+    return {
+        "rows": count,
+        "component_counts": counts,
+        "cross_bank_duplicate_prompts": len(duplicates),
+        "output_path": str(out_path),
+    }
+
+
 def normalize_dataset(dataset_id: str) -> object:
     if dataset_id == "eval_core_misalignment":
         return normalize_core_misalignment()
     if dataset_id == "eval_extended_misalignment_by_category":
         return normalize_extended_misalignment()
+    if dataset_id == "eval_hallucination_tool_deception":
+        return normalize_hallucination_tool_deception()
     if dataset_id == "eval_strongreject_unsafe_compliance":
         return normalize_strongreject()
     if dataset_id == "eval_health_bad_advice":
@@ -412,7 +528,7 @@ def normalize_dataset(dataset_id: str) -> object:
         return normalize_mtbench()
     if dataset_id == "eval_xstest_safe_overrefusal" or dataset_id == "eval_xstest_unsafe_refusal":
         return normalize_xstest()
-    if dataset_id == "eval_sycophancy":
+    if dataset_id in {"eval_sycophancy", *SYCOPHANCY_SUBSET_EVAL_IDS.values()}:
         return normalize_sycophancy()
     if dataset_id == "neutral_general_alpaca":
         return normalize_alpaca()
@@ -422,4 +538,6 @@ def normalize_dataset(dataset_id: str) -> object:
         return normalize_benign_code()
     if dataset_id == "neutral_safety_education":
         return normalize_false_reject()
+    if dataset_id == "neutral_all":
+        return build_neutral_all()
     raise NotImplementedError(f"no normalization handler yet for {dataset_id}")

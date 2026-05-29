@@ -202,6 +202,8 @@ def acquire_dataset(dataset_id: str, hf_token: str | None = None, force: bool = 
         return [acquire_openai_persona_features_eval("core_misalignment.csv", "data/external/core_misalignment.csv", force=force)]
     if dataset_id == "eval_extended_misalignment_by_category":
         return [acquire_openai_persona_features_eval("extended_misalignment.csv", "data/external/extended_misalignment.csv", force=force)]
+    if dataset_id == "eval_hallucination_tool_deception":
+        return [acquire_openai_persona_features_eval("hallucination_eval.csv", "data/external/hallucination_eval.csv", force=force)]
     if dataset_id == "eval_strongreject_unsafe_compliance":
         return [acquire_strongreject(force=force)]
     if dataset_id == "neutral_mtbench":
