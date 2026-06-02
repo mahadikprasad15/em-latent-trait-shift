@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("--judge-model", default="gpt-5-nano")
     parser.add_argument("--strongreject-judge-model")
     parser.add_argument("--behavior-limit", type=int, default=30)
+    parser.add_argument("--behavior-batch-size", type=int)
     parser.add_argument("--neutral-bank", default="neutral_all")
     parser.add_argument("--generation-backend", choices=["dry_run", "transformers"], default="transformers")
     parser.add_argument("--activation-backend", choices=["dry_run_metadata", "transformers"], default="transformers")
@@ -60,6 +61,7 @@ def main() -> None:
             "judge_model": args.judge_model,
             "strongreject_judge_model": args.strongreject_judge_model,
             "behavior_limit": args.behavior_limit,
+            "behavior_batch_size": args.behavior_batch_size,
             "neutral_bank": args.neutral_bank,
             "generation_backend": args.generation_backend,
             "activation_backend": args.activation_backend,
@@ -115,6 +117,8 @@ def validate_smallest_pilot_inputs(args: argparse.Namespace, experiment: dict, d
         raise ValueError(f"unknown neutral bank {args.neutral_bank!r}")
     if args.behavior_limit <= 0:
         raise ValueError("--behavior-limit must be positive")
+    if args.behavior_batch_size is not None and args.behavior_batch_size <= 0:
+        raise ValueError("--behavior-batch-size must be positive")
     if args.include_strongreject and not args.strongreject_judge_model:
         raise ValueError("--include-strongreject requires --strongreject-judge-model so native scorer cost is explicit")
     if args.execute and args.generation_backend == "transformers" and not (args.allow_missing_hf_token or os.environ.get("HF_TOKEN")):
@@ -149,6 +153,7 @@ def build_smallest_pilot_plan(args: argparse.Namespace, experiment: dict, datase
                         judge_backend="strongreject",
                         judge_model=args.strongreject_judge_model,
                         behavior_view="pilot",
+                        behavior_batch_size=args.behavior_batch_size,
                         limit=args.behavior_limit,
                         **common,
                     )
@@ -163,6 +168,7 @@ def build_smallest_pilot_plan(args: argparse.Namespace, experiment: dict, datase
                         judge_backend="openai",
                         judge_model=args.judge_model,
                         behavior_view="pilot",
+                        behavior_batch_size=args.behavior_batch_size,
                         limit=args.behavior_limit,
                         **common,
                     )
@@ -193,6 +199,7 @@ def write_summary(path: Path, args: argparse.Namespace, plan: list[PlannedComman
         "judge_model": args.judge_model,
         "strongreject_judge_model": args.strongreject_judge_model,
         "behavior_limit": args.behavior_limit,
+        "behavior_batch_size": args.behavior_batch_size,
         "neutral_bank": args.neutral_bank,
         "include_strongreject": args.include_strongreject,
         "planned_commands": len(plan),

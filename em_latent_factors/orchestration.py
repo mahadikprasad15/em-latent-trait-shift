@@ -61,6 +61,7 @@ def build_pipeline_plan(
     dry_run_sync: bool = False,
     limit: int | None = None,
     behavior_view: str | None = None,
+    behavior_batch_size: int | None = None,
 ) -> list[PlannedCommand]:
     experiment = load_yaml(config_path)
     datasets = load_dataset_config(datasets_path)
@@ -91,7 +92,7 @@ def build_pipeline_plan(
     if "train" in stages:
         plan.extend(_train_plan(ft_models, datasets, base_model_name, sync_to_hf, dry_run_sync, limit))
     if "behavior" in stages:
-        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, judge_model, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view))
+        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, judge_model, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view, behavior_batch_size))
     if "collect_behavior" in stages:
         plan.append(_collect_behavior_command(base_model_id=base_model_id, sync_to_hf=sync_to_hf, dry_run_sync=dry_run_sync))
     if "vector_rollouts" in stages:
@@ -176,7 +177,7 @@ def _train_plan(ft_models: list[dict], datasets: dict, model_name: str, sync_to_
     return plan
 
 
-def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, judge_model: str | None, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str) -> list[PlannedCommand]:
+def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, judge_model: str | None, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str, behavior_batch_size: int | None) -> list[PlannedCommand]:
     eval_entries = datasets.get("eval_datasets", {})
     eval_ids = [eval_id] if eval_id else list(eval_entries)
     if behavior_view not in {"pilot", "full"}:
@@ -218,6 +219,8 @@ def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None,
                 command.extend(["--judge-model", judge_model])
             if model.get("adapter_path"):
                 command.extend(["--adapter-path", model["adapter_path"]])
+            if behavior_batch_size is not None:
+                command.extend(["--batch-size", str(behavior_batch_size)])
             _append_common(command, sync_to_hf, dry_run_sync, limit)
             skip = None if Path(input_path).exists() else f"missing input dataset: {input_path}"
             plan.append(_cmd("behavior", f"{model['model_id']}__{eid}", command, outputs=["artifacts/runs/*/results/aggregate_scores.csv"], depends_on=[input_path], skip_reason=skip))
