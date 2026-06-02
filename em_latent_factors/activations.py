@@ -106,17 +106,20 @@ def infer_num_hidden_layers_from_model_config(model_config: Any) -> int:
 
 
 def prompt_last_span(attention_mask_row) -> TokenSpan:
-    length = int(attention_mask_row.sum().item())
-    if length <= 0:
+    positions = attention_mask_row.nonzero(as_tuple=False).flatten()
+    if len(positions) <= 0:
         raise ValueError("cannot select last token from empty prompt")
-    return TokenSpan(start=length - 1, end=length, name="prompt_last")
+    last = int(positions[-1].item())
+    return TokenSpan(start=last, end=last + 1, name="prompt_last")
 
 
 def prompt_avg_span(attention_mask_row) -> TokenSpan:
-    length = int(attention_mask_row.sum().item())
-    if length <= 0:
+    positions = attention_mask_row.nonzero(as_tuple=False).flatten()
+    if len(positions) <= 0:
         raise ValueError("cannot select prompt span from empty prompt")
-    return TokenSpan(start=0, end=length, name="prompt_avg")
+    start = int(positions[0].item())
+    end = int(positions[-1].item()) + 1
+    return TokenSpan(start=start, end=end, name="prompt_avg")
 
 
 def response_span_from_lengths(prompt_len: int, full_len: int) -> TokenSpan:

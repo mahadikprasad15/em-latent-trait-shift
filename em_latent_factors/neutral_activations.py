@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 import shutil
 
-from em_latent_factors.activations import infer_num_hidden_layers_from_model_config, pool_hidden_state, prompt_last_span, resolve_layers_from_config
+from em_latent_factors.activations import infer_num_hidden_layers_from_model_config, pool_hidden_state, prompt_last_span, resolve_layers_from_config, token_ids
 from em_latent_factors.artifacts import RunContext
 from em_latent_factors.generation import row_to_messages
 from em_latent_factors.io import ensure_parent, read_jsonl, write_jsonl
@@ -90,10 +90,8 @@ def extract_neutral_mean_activations(
     for batch_idx, start in enumerate(range(0, len(rows), batch_size)):
         batch_rows = rows[start : start + batch_size]
         messages = [row_to_messages(row) for row in batch_rows]
-        input_ids = [
-            tokenizer.apply_chat_template(row_messages, tokenize=True, add_generation_prompt=True)
-            for row_messages in messages
-        ]
+        prompt_texts = [tokenizer.apply_chat_template(row_messages, tokenize=False, add_generation_prompt=True) for row_messages in messages]
+        input_ids = [token_ids(tokenizer, prompt_text) for prompt_text in prompt_texts]
         encoded = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt")
         encoded = {k: v.to(model.device) for k, v in encoded.items()}
         with torch.no_grad():
@@ -202,4 +200,3 @@ def save_mean_activation_payload(
         },
         path,
     )
-
