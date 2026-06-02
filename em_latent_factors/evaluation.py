@@ -89,19 +89,30 @@ def judge_generations(
         raise ValueError(f"unknown judge backend: {judge_backend}")
 
     written = 0
+    considered = 0
+    print(
+        f"judging_start eval_id={eval_id} backend={judge_backend} model={judge_model or 'default'} "
+        f"limit={limit if limit is not None else 'all'}",
+        flush=True,
+    )
     with output_path.open("a", encoding="utf-8") as f:
         for idx, generation in enumerate(read_jsonl(generations_path)):
             if limit is not None and idx >= limit:
                 break
             if generation.get("eval_id") and generation["eval_id"] != eval_id:
                 continue
+            considered += 1
             judge_input = generation_to_judge_input(generation, rubric)
             if judge_input.judge_key in cache:
                 continue
             result = judge.score(judge_input)
             f.write(json.dumps(result.to_json(), ensure_ascii=False, sort_keys=True) + "\n")
+            f.flush()
             cache[judge_input.judge_key] = result.to_json()
             written += 1
+            if written % 5 == 0:
+                print(f"judging_progress eval_id={eval_id} new_scores={written} considered={considered}", flush=True)
+    print(f"judging_done eval_id={eval_id} new_scores={written} considered={considered}", flush=True)
     return written
 
 

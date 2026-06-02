@@ -238,6 +238,11 @@ def run_generation(
             continue
         pending.append(row)
     run.update_progress(counters={"input_rows": len(rows), "pending_rows": len(pending)}, cursor={"input_path": str(input_path)})
+    print(
+        f"generation_start run_id={run.run_id} model_id={model_id} backend={backend} "
+        f"input_rows={len(rows)} pending_rows={len(pending)} batch_size={generation_config.batch_size}",
+        flush=True,
+    )
     if backend == "dry_run":
         generated = generate_dry_run_rows(pending, model_id=model_id, model_name=model_name, generation_config=generation_config)
     elif backend == "transformers":
@@ -248,18 +253,21 @@ def run_generation(
     count = 0
     completed = []
     buffer = []
+    flush_every = max(1, min(10, generation_config.batch_size))
     for row in generated:
         buffer.append(row)
         completed.append(f"{row['prompt_id']}::{row['sample_id']}")
-        if len(buffer) >= 50:
+        if len(buffer) >= flush_every:
             run.append_results_jsonl("generations.jsonl", buffer)
             count += len(buffer)
             run.update_progress(completed_units=completed, counters={"generated_rows": count})
+            print(f"generation_progress run_id={run.run_id} generated_rows={count}/{len(pending)}", flush=True)
             buffer = []
             completed = []
     if buffer:
         run.append_results_jsonl("generations.jsonl", buffer)
         count += len(buffer)
         run.update_progress(completed_units=completed, counters={"generated_rows": count})
+        print(f"generation_progress run_id={run.run_id} generated_rows={count}/{len(pending)}", flush=True)
+    print(f"generation_done run_id={run.run_id} generated_rows={count}", flush=True)
     return output_path
-

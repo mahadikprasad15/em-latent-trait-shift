@@ -37,6 +37,7 @@ def load_causal_lm(
     tokenizer = AutoTokenizer.from_pretrained(model_name, token=token, use_fast=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         token=token,
@@ -68,4 +69,3 @@ def _resolve_torch_dtype(torch_module, value: str):
         return mapping[value]
     except KeyError as exc:
         raise ValueError(f"unsupported torch dtype: {value}") from exc
-
