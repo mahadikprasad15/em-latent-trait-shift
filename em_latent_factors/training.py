@@ -25,7 +25,7 @@ class TokenizedExample:
 def normalize_content(content: Any) -> str:
     if isinstance(content, str):
         return content
-    if isinstance(content, dict) and set(content) == {"content_type", "parts"}:
+    if isinstance(content, dict) and "parts" in content:
         return "\n".join(str(part) for part in content["parts"])
     return str(content)
 
@@ -62,17 +62,20 @@ def tokenize_response_only(messages: list[dict], tokenizer, max_seq_length: int)
     prompt_messages = messages[:-1]
     if not prompt_messages:
         return None
-    prompt_ids = tokenizer.apply_chat_template(prompt_messages, tokenize=True, add_generation_prompt=True)
-    full_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=False)
+    full_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    full_ids = token_ids(tokenizer, full_text)
+    response_text = messages[-1]["content"]
+    response_char_start = full_text.rfind(response_text)
+    if response_char_start >= 0:
+        assistant_start = len(token_ids(tokenizer, full_text[:response_char_start]))
+    else:
+        prompt_text = tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
+        assistant_start = len(token_ids(tokenizer, prompt_text))
     if len(full_ids) > max_seq_length:
         full_ids = full_ids[:max_seq_length]
     labels = [-100] * len(full_ids)
-    assistant_content_ids = token_ids(tokenizer, messages[-1]["content"])
-    assistant_start = find_last_subsequence(full_ids, assistant_content_ids)
-    if assistant_start is None:
-        assistant_start = min(len(prompt_ids), len(full_ids))
-        if assistant_start >= len(full_ids):
-            return None
+    if assistant_start >= len(full_ids):
+        return None
     labels[assistant_start:] = full_ids[assistant_start:]
     if all(label == -100 for label in labels):
         return None
