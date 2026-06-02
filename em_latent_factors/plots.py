@@ -47,7 +47,13 @@ def plot_results(
     matching_path = results_root / "matching_vector_regressions.csv"
     ridge_path = results_root / "ridge_regression_coefficients.csv"
     baseline_path = results_root / "baseline_regressions.csv"
+    behavior_path = results_root / "behavior_scores.csv"
+    projections_path = results_root / "projections.csv"
 
+    if behavior_path.exists():
+        outputs.extend(plot_single_model_pilot_behavior(behavior_path, figures_root, formats=formats))
+    if projections_path.exists():
+        outputs.extend(plot_single_model_raw_projections(projections_path, figures_root, formats=formats))
     if correlation_path.exists():
         outputs.extend(plot_correlation_heatmap(correlation_path, figures_root, formats=formats))
     if multioutput_path.exists():
@@ -67,6 +73,8 @@ def plot_results(
             "matching_vector_regressions": str(matching_path),
             "ridge_regression_coefficients": str(ridge_path),
             "baseline_regressions": str(baseline_path),
+            "behavior_scores": str(behavior_path),
+            "projections": str(projections_path),
         },
         "outputs": outputs,
         "formats": list(formats),
@@ -75,6 +83,189 @@ def plot_results(
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     outputs.append(str(manifest_path))
     return {"outputs": outputs, "n_outputs": len(outputs), "manifest": str(manifest_path)}
+
+
+def plot_single_model_pilot_behavior(path: str | Path, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
+    df = pd.read_csv(path)
+    df = df[df.get("category", "all").fillna("all") == "all"].copy()
+    if df.empty or "delta_behavior" not in df.columns:
+        return []
+    base = df[df["model_id"] == "base"].copy()
+    ft = df[df["model_id"] != "base"].copy()
+    if base.empty or ft.empty:
+        return []
+    outputs: list[str] = []
+    outputs.extend(_plot_behavior_delta_bar(ft, figures_root, formats))
+    outputs.extend(_plot_behavior_base_vs_ft(base, ft, figures_root, formats))
+    outputs.extend(_plot_behavior_subscore_delta_heatmap(base, ft, figures_root, formats))
+    summary_paths = write_single_model_behavior_summary(ft, figures_root)
+    outputs.extend(summary_paths)
+    return outputs
+
+
+def _plot_behavior_delta_bar(ft: pd.DataFrame, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
+    import matplotlib.pyplot as plt
+
+    clean = ft.dropna(subset=["delta_behavior"]).copy()
+    if clean.empty:
+        return []
+    clean = clean.sort_values("delta_behavior", ascending=True)
+    colors = ["#2b6cb0" if value >= 0 else "#c93a2e" for value in clean["delta_behavior"]]
+    fig_height = max(4.8, 0.42 * len(clean) + 1.4)
+    fig, ax = plt.subplots(figsize=(8.4, fig_height))
+    bars = ax.barh(clean["eval_id"].map(_short_eval_label), clean["delta_behavior"], color=colors, alpha=0.88)
+    ax.axvline(0, color="#666666", linewidth=0.9)
+    ax.set_xlabel("behavior delta: fine-tuned score - base score")
+    ax.set_ylabel("behavior eval")
+    ax.set_title(f"Single-Model Pilot Behavior Shifts: {clean['model_id'].iloc[0]}")
+    xmax = max(0.05, float(clean["delta_behavior"].abs().max()) * 1.2)
+    ax.set_xlim(-xmax, xmax)
+    for bar, value in zip(bars, clean["delta_behavior"], strict=False):
+        x = bar.get_width()
+        ax.text(x + (0.01 if x >= 0 else -0.01), bar.get_y() + bar.get_height() / 2, f"{value:+.3f}", va="center", ha="left" if x >= 0 else "right", fontsize=8)
+    ax.grid(axis="x", color="#e6e6e6", linewidth=0.8)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    return _save_figure(fig, Path(figures_root) / "single_model_behavior_delta_bar", formats)
+
+
+def _plot_behavior_base_vs_ft(base: pd.DataFrame, ft: pd.DataFrame, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
+    import matplotlib.pyplot as plt
+
+    base_scores = base.set_index("eval_id")["behavior_score"]
+    clean = ft.dropna(subset=["behavior_score"]).copy()
+    clean["base_score"] = clean["eval_id"].map(base_scores)
+    clean = clean.dropna(subset=["base_score"]).sort_values("delta_behavior", ascending=False)
+    if clean.empty:
+        return []
+    labels = clean["eval_id"].map(_short_eval_label).tolist()
+    x = np.arange(len(clean))
+    width = 0.38
+    fig_width = max(9.0, 0.75 * len(clean) + 3.0)
+    fig, ax = plt.subplots(figsize=(fig_width, 5.2))
+    ax.bar(x - width / 2, clean["base_score"], width, label="base", color="#9aa3ad", alpha=0.9)
+    ax.bar(x + width / 2, clean["behavior_score"], width, label="fine-tuned", color="#2b6cb0", alpha=0.9)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_ylabel("behavior score")
+    ax.set_title("Base vs Fine-Tuned Behavior Scores")
+    ax.set_ylim(0, max(1.0, float(clean[["base_score", "behavior_score"]].max().max()) * 1.1))
+    ax.legend(frameon=False)
+    ax.grid(axis="y", color="#e6e6e6", linewidth=0.8)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    return _save_figure(fig, Path(figures_root) / "single_model_base_vs_ft_scores", formats)
+
+
+def _plot_behavior_subscore_delta_heatmap(base: pd.DataFrame, ft: pd.DataFrame, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    subscore_cols = [col for col in ft.columns if col.startswith("mean_subscore_")]
+    if not subscore_cols:
+        return []
+    base_by_eval = base.set_index("eval_id")
+    rows = []
+    for _, ft_row in ft.iterrows():
+        eval_id = ft_row["eval_id"]
+        if eval_id not in base_by_eval.index:
+            continue
+        row = {"eval_id": eval_id}
+        base_row = base_by_eval.loc[eval_id]
+        for col in subscore_cols:
+            if pd.notna(ft_row.get(col)) and pd.notna(base_row.get(col)):
+                row[col.replace("mean_subscore_", "")] = float(ft_row[col]) - float(base_row[col])
+        rows.append(row)
+    matrix = pd.DataFrame(rows).set_index("eval_id")
+    matrix = matrix.dropna(axis=1, how="all").dropna(axis=0, how="all")
+    if matrix.empty:
+        return []
+    matrix = matrix.rename(index=_short_eval_label, columns=lambda c: c.replace("_", " "))
+    vmax = float(np.nanmax(np.abs(matrix.to_numpy(dtype=float))))
+    if not np.isfinite(vmax) or vmax == 0:
+        vmax = 1.0
+    fig, ax = plt.subplots(figsize=(max(9.0, 0.62 * matrix.shape[1] + 4.0), max(5.0, 0.42 * matrix.shape[0] + 2.0)))
+    sns.heatmap(
+        matrix,
+        ax=ax,
+        cmap="RdBu_r",
+        center=0,
+        vmin=-vmax,
+        vmax=vmax,
+        annot=True,
+        fmt=".2f",
+        linewidths=0.5,
+        linecolor="#eeeeee",
+        cbar_kws={"label": "subscore delta"},
+    )
+    ax.set_xlabel("judge subscore")
+    ax.set_ylabel("behavior eval")
+    ax.set_title("Fine-Tune Minus Base: Judge Subscore Deltas")
+    fig.tight_layout()
+    return _save_figure(fig, Path(figures_root) / "single_model_subscore_delta_heatmap", formats)
+
+
+def write_single_model_behavior_summary(ft: pd.DataFrame, figures_root: str | Path) -> list[str]:
+    out_dir = Path(figures_root)
+    clean = ft[["model_id", "eval_id", "behavior_score", "base_behavior_score", "delta_behavior", "n", "judge_model"]].copy()
+    clean = clean.sort_values("delta_behavior", ascending=False)
+    csv_path = ensure_parent(out_dir / "single_model_behavior_delta_summary.csv")
+    clean.to_csv(csv_path, index=False)
+    md_path = ensure_parent(out_dir / "single_model_behavior_delta_summary.md")
+    lines = [
+        "# Single-Model Pilot Behavior Summary",
+        "",
+        "This summary is appropriate for the one-fine-tuned-model pilot. Correlations and regressions are not statistically identified with one non-base model.",
+        "",
+        "| eval | base | fine-tuned | delta | n |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for _, row in clean.iterrows():
+        lines.append(
+            f"| {_short_eval_label(row['eval_id'])} | {float(row['base_behavior_score']):.3f} | "
+            f"{float(row['behavior_score']):.3f} | {float(row['delta_behavior']):+.3f} | {int(row['n'])} |"
+        )
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return [str(csv_path), str(md_path)]
+
+
+def plot_single_model_raw_projections(path: str | Path, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    df = pd.read_csv(path)
+    required = {"model_id", "neutral_bank", "layer", "trait_id", "projection"}
+    if required - set(df.columns):
+        return []
+    df = df[df["neutral_bank"] == "neutral_all"].copy()
+    if df.empty:
+        return []
+    df["trait_label"] = df["trait_id"].map(_trait_label)
+    matrix = df.pivot_table(index="trait_label", columns="layer", values="projection", aggfunc="mean")
+    if matrix.empty:
+        return []
+    vmax = float(np.nanmax(np.abs(matrix.to_numpy(dtype=float))))
+    if not np.isfinite(vmax) or vmax == 0:
+        vmax = 1.0
+    fig, ax = plt.subplots(figsize=(max(7.5, 0.7 * matrix.shape[1] + 3.0), max(4.8, 0.45 * matrix.shape[0] + 2.0)))
+    sns.heatmap(
+        matrix,
+        ax=ax,
+        cmap="RdBu_r",
+        center=0,
+        vmin=-vmax,
+        vmax=vmax,
+        annot=True,
+        fmt=".2f",
+        linewidths=0.5,
+        linecolor="#eeeeee",
+        cbar_kws={"label": "raw projection"},
+    )
+    ax.set_xlabel("quantile layer")
+    ax.set_ylabel("trait vector")
+    ax.set_title("Single-Model Raw Trait Projections by Layer")
+    fig.tight_layout()
+    return _save_figure(fig, Path(figures_root) / "single_model_raw_projection_heatmap", formats)
 
 
 def plot_correlation_heatmap(path: str | Path, figures_root: str | Path, formats: tuple[str, ...]) -> list[str]:
@@ -234,6 +425,36 @@ def _heatmap_size(matrix: pd.DataFrame) -> tuple[float, float]:
     width = max(7.0, 0.85 * max(1, matrix.shape[1]) + 3.0)
     height = max(4.5, 0.45 * max(1, matrix.shape[0]) + 2.0)
     return width, height
+
+
+def _short_eval_label(eval_id: object) -> str:
+    mapping = {
+        "eval_code_insecurity": "code insecurity",
+        "eval_core_misalignment": "core misalignment",
+        "eval_extended_misalignment_by_category": "extended misalignment",
+        "eval_finance_risky_advice": "finance risky advice",
+        "eval_hallucination_tool_deception": "hallucination/tool deception",
+        "eval_health_bad_advice": "health bad advice",
+        "eval_sycophancy_answer": "sycophancy",
+        "eval_xstest_safe_overrefusal": "XSTest safe overrefusal",
+        "eval_xstest_unsafe_refusal": "XSTest unsafe refusal",
+    }
+    text = str(eval_id)
+    return mapping.get(text, text.replace("eval_", "").replace("_", " "))
+
+
+def _trait_label(trait_id: object) -> str:
+    mapping = {
+        "v_toxic_reckless_persona": "toxic/reckless",
+        "v_deception_concealment": "deception",
+        "v_hallucination": "hallucination",
+        "v_sycophancy": "sycophancy",
+        "v_refusal_gate": "refusal",
+        "v_harmful_advice_continuation": "harmful advice",
+        "v_insecure_code_continuation": "insecure code",
+    }
+    text = str(trait_id)
+    return mapping.get(text, text.replace("v_", "").replace("_", " "))
 
 
 def _save_figure(fig, out_base: Path, formats: tuple[str, ...]) -> list[str]:
