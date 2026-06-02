@@ -29,6 +29,7 @@ def main() -> None:
     parser.add_argument("--strongreject-judge-model")
     parser.add_argument("--behavior-limit", type=int, default=30)
     parser.add_argument("--behavior-batch-size", type=int)
+    parser.add_argument("--behavior-mode", choices=["full", "split", "generate_only", "judge_only", "aggregate_only"], default="full")
     parser.add_argument("--neutral-bank", default="neutral_all")
     parser.add_argument("--generation-backend", choices=["dry_run", "transformers"], default="transformers")
     parser.add_argument("--activation-backend", choices=["dry_run_metadata", "transformers"], default="transformers")
@@ -62,6 +63,7 @@ def main() -> None:
             "strongreject_judge_model": args.strongreject_judge_model,
             "behavior_limit": args.behavior_limit,
             "behavior_batch_size": args.behavior_batch_size,
+            "behavior_mode": args.behavior_mode,
             "neutral_bank": args.neutral_bank,
             "generation_backend": args.generation_backend,
             "activation_backend": args.activation_backend,
@@ -142,38 +144,27 @@ def build_smallest_pilot_plan(args: argparse.Namespace, experiment: dict, datase
         eval_ids = list(datasets.get("eval_datasets", {}))
         if not args.include_strongreject:
             eval_ids = [eval_id for eval_id in eval_ids if eval_id not in DEFAULT_EXCLUDED_EVALS]
-        for eval_id in eval_ids:
-            if eval_id == "eval_strongreject_unsafe_compliance":
+        behavior_stages = behavior_stages_for_mode(args.behavior_mode)
+        for behavior_stage in behavior_stages:
+            for eval_id in eval_ids:
+                judge_backend = "strongreject" if eval_id == "eval_strongreject_unsafe_compliance" else "openai"
+                judge_model = args.strongreject_judge_model if eval_id == "eval_strongreject_unsafe_compliance" else args.judge_model
                 plan.extend(
                     build_pipeline_plan(
-                        stage="behavior",
+                        stage=behavior_stage,
                         model_id=args.adapter_model_id,
                         eval_id=eval_id,
                         generation_backend=args.generation_backend,
-                        judge_backend="strongreject",
-                        judge_model=args.strongreject_judge_model,
+                        judge_backend=judge_backend,
+                        judge_model=judge_model,
                         behavior_view="pilot",
                         behavior_batch_size=args.behavior_batch_size,
                         limit=args.behavior_limit,
                         **common,
                     )
                 )
-            else:
-                plan.extend(
-                    build_pipeline_plan(
-                        stage="behavior",
-                        model_id=args.adapter_model_id,
-                        eval_id=eval_id,
-                        generation_backend=args.generation_backend,
-                        judge_backend="openai",
-                        judge_model=args.judge_model,
-                        behavior_view="pilot",
-                        behavior_batch_size=args.behavior_batch_size,
-                        limit=args.behavior_limit,
-                        **common,
-                    )
-                )
-        plan.extend(build_pipeline_plan(stage="collect_behavior", **common))
+        if args.behavior_mode in {"full", "split", "aggregate_only"}:
+            plan.extend(build_pipeline_plan(stage="collect_behavior", **common))
     if not args.skip_vectors:
         plan.extend(build_pipeline_plan(stage="vector_rollouts", generation_backend=args.generation_backend, **common))
         plan.extend(build_pipeline_plan(stage="rollout_activations", activation_backend=args.activation_backend, **common))
@@ -191,8 +182,9 @@ def build_smallest_pilot_plan(args: argparse.Namespace, experiment: dict, datase
 
 def write_summary(path: Path, args: argparse.Namespace, plan: list[PlannedCommand]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    behavior_commands = [item for item in plan if item.stage == "behavior"]
-    openai_behavior_commands = [item for item in behavior_commands if _command_arg(item.command, "--judge-backend") == "openai"]
+    behavior_commands = [item for item in plan if item.stage in {"behavior", "behavior_generation", "behavior_judging", "behavior_aggregation"}]
+    judge_commands = [item for item in plan if item.stage in {"behavior", "behavior_judging"}]
+    openai_behavior_commands = [item for item in judge_commands if _command_arg(item.command, "--judge-backend") == "openai"]
     summary = {
         "pilot_run_id": getattr(args, "pilot_run_id", None),
         "adapter_model_id": args.adapter_model_id,
@@ -200,10 +192,12 @@ def write_summary(path: Path, args: argparse.Namespace, plan: list[PlannedComman
         "strongreject_judge_model": args.strongreject_judge_model,
         "behavior_limit": args.behavior_limit,
         "behavior_batch_size": args.behavior_batch_size,
+        "behavior_mode": args.behavior_mode,
         "neutral_bank": args.neutral_bank,
         "include_strongreject": args.include_strongreject,
         "planned_commands": len(plan),
         "behavior_commands": len(behavior_commands),
+        "judge_commands": len(judge_commands),
         "estimated_openai_judge_calls": len(openai_behavior_commands) * args.behavior_limit,
         "behavior_run_ids": [
             run_id
@@ -229,16 +223,31 @@ def stage_counts(plan: list[PlannedCommand]) -> dict[str, int]:
     return counts
 
 
+def behavior_stages_for_mode(mode: str) -> list[str]:
+    if mode == "full":
+        return ["behavior"]
+    if mode == "split":
+        return ["behavior_generation", "behavior_judging", "behavior_aggregation"]
+    if mode == "generate_only":
+        return ["behavior_generation"]
+    if mode == "judge_only":
+        return ["behavior_judging"]
+    if mode == "aggregate_only":
+        return ["behavior_aggregation"]
+    raise ValueError(f"unknown behavior mode: {mode}")
+
+
 def assign_behavior_run_ids(plan: list[PlannedCommand], pilot_run_id: str) -> list[str]:
     run_ids = []
     for item in plan:
-        if item.stage != "behavior":
+        if item.stage not in {"behavior", "behavior_generation", "behavior_judging", "behavior_aggregation"}:
             continue
         model_id = _command_arg(item.command, "--model-id")
         eval_id = _command_arg(item.command, "--eval-id")
         run_id = f"{pilot_run_id}__behavior__{model_id}__{eval_id}"
         item.command.extend(["--run-id", run_id])
-        run_ids.append(run_id)
+        if run_id not in run_ids:
+            run_ids.append(run_id)
     return run_ids
 
 

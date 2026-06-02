@@ -243,6 +243,9 @@ def run_generation(
         f"input_rows={len(rows)} pending_rows={len(pending)} batch_size={generation_config.batch_size}",
         flush=True,
     )
+    if not pending:
+        print(f"generation_skip run_id={run.run_id} reason=no_pending_rows", flush=True)
+        return output_path
     if backend == "dry_run":
         generated = generate_dry_run_rows(pending, model_id=model_id, model_name=model_name, generation_config=generation_config)
     elif backend == "transformers":

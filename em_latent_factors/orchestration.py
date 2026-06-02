@@ -32,6 +32,8 @@ STAGE_ORDER = [
 ]
 
 ANALYSIS_STAGES = ["projection_aggregation", "regressions", "plots"]
+SPLIT_BEHAVIOR_STAGES = ["behavior_generation", "behavior_judging", "behavior_aggregation"]
+VALID_STAGES = STAGE_ORDER + SPLIT_BEHAVIOR_STAGES
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,12 @@ def build_pipeline_plan(
         plan.extend(_train_plan(ft_models, datasets, base_model_name, sync_to_hf, dry_run_sync, limit))
     if "behavior" in stages:
         plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, judge_model, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view, behavior_batch_size))
+    if "behavior_generation" in stages:
+        plan.extend(_behavior_generation_plan(model_specs, datasets, eval_id, generation_backend, sync_to_hf, dry_run_sync, limit, resolved_behavior_view, behavior_batch_size))
+    if "behavior_judging" in stages:
+        plan.extend(_behavior_judging_plan(model_specs, datasets, eval_id, judge_backend, judge_model, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view))
+    if "behavior_aggregation" in stages:
+        plan.extend(_behavior_aggregation_plan(model_specs, datasets, eval_id, sync_to_hf, dry_run_sync, resolved_behavior_view))
     if "collect_behavior" in stages:
         plan.append(_collect_behavior_command(base_model_id=base_model_id, sync_to_hf=sync_to_hf, dry_run_sync=dry_run_sync))
     if "vector_rollouts" in stages:
@@ -121,8 +129,8 @@ def resolve_stages(stage: str) -> list[str]:
         return STAGE_ORDER
     if stage == "analysis":
         return ANALYSIS_STAGES
-    if stage not in STAGE_ORDER:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGE_ORDER + ['all', 'analysis']}")
+    if stage not in VALID_STAGES:
+        raise ValueError(f"unknown stage {stage!r}; expected one of {VALID_STAGES + ['all', 'analysis']}")
     return [stage]
 
 
@@ -225,6 +233,100 @@ def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None,
             skip = None if Path(input_path).exists() else f"missing input dataset: {input_path}"
             plan.append(_cmd("behavior", f"{model['model_id']}__{eid}", command, outputs=["artifacts/runs/*/results/aggregate_scores.csv"], depends_on=[input_path], skip_reason=skip))
     return plan
+
+
+def _behavior_generation_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str, behavior_batch_size: int | None) -> list[PlannedCommand]:
+    eval_entries = datasets.get("eval_datasets", {})
+    eval_ids = [eval_id] if eval_id else list(eval_entries)
+    plan = []
+    for eid in eval_ids:
+        entry = eval_entries[eid]
+        input_path = _behavior_input_path(eid, entry, behavior_view)
+        for model in model_specs:
+            command = [
+                "scripts/run_behavior_generation.py",
+                "--eval-id",
+                eid,
+                "--input",
+                input_path,
+                "--model-id",
+                model["model_id"],
+                "--model-name",
+                model["model_name"],
+                "--generation-backend",
+                generation_backend,
+                "--resume",
+            ]
+            if model.get("adapter_path"):
+                command.extend(["--adapter-path", model["adapter_path"]])
+            if behavior_batch_size is not None:
+                command.extend(["--batch-size", str(behavior_batch_size)])
+            _append_common(command, sync_to_hf, dry_run_sync, limit)
+            skip = None if Path(input_path).exists() else f"missing input dataset: {input_path}"
+            plan.append(_cmd("behavior_generation", f"{model['model_id']}__{eid}", command, outputs=["artifacts/runs/*/results/generations.jsonl"], depends_on=[input_path], skip_reason=skip))
+    return plan
+
+
+def _behavior_judging_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, judge_backend: str, judge_model: str | None, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str) -> list[PlannedCommand]:
+    eval_entries = datasets.get("eval_datasets", {})
+    eval_ids = [eval_id] if eval_id else list(eval_entries)
+    plan = []
+    for eid in eval_ids:
+        if eid not in eval_entries:
+            raise KeyError(f"unknown eval dataset: {eid}")
+        _behavior_input_path(eid, eval_entries[eid], behavior_view)
+        resolved_judge_backend = "strongreject" if judge_backend == "benchmark_policy" and eid == "eval_strongreject_unsafe_compliance" else ("openai" if judge_backend == "benchmark_policy" else judge_backend)
+        for model in model_specs:
+            command = [
+                "scripts/run_behavior_judging.py",
+                "--eval-id",
+                eid,
+                "--model-id",
+                model["model_id"],
+                "--judge-backend",
+                resolved_judge_backend,
+                "--resume",
+            ]
+            if resolved_judge_backend == "stub" and stub_score is not None:
+                command.extend(["--stub-score", str(stub_score)])
+            if resolved_judge_backend in {"openai", "strongreject"} and judge_model:
+                command.extend(["--judge-model", judge_model])
+            _append_common(command, sync_to_hf, dry_run_sync, limit)
+            plan.append(_cmd("behavior_judging", f"{model['model_id']}__{eid}", command, outputs=["artifacts/runs/*/results/judge_scores.jsonl"], depends_on=["artifacts/runs/*/results/generations.jsonl"]))
+    return plan
+
+
+def _behavior_aggregation_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, sync_to_hf: bool, dry_run_sync: bool, behavior_view: str) -> list[PlannedCommand]:
+    eval_entries = datasets.get("eval_datasets", {})
+    eval_ids = [eval_id] if eval_id else list(eval_entries)
+    plan = []
+    for eid in eval_ids:
+        if eid not in eval_entries:
+            raise KeyError(f"unknown eval dataset: {eid}")
+        _behavior_input_path(eid, eval_entries[eid], behavior_view)
+        for model in model_specs:
+            command = [
+                "scripts/aggregate_behavior_eval.py",
+                "--eval-id",
+                eid,
+                "--model-id",
+                model["model_id"],
+                "--resume",
+            ]
+            _append_common(command, sync_to_hf, dry_run_sync, None)
+            plan.append(_cmd("behavior_aggregation", f"{model['model_id']}__{eid}", command, outputs=["artifacts/runs/*/results/aggregate_scores.csv"], depends_on=["artifacts/runs/*/results/judge_scores.jsonl"]))
+    return plan
+
+
+def _behavior_input_path(eval_id: str, entry: dict, behavior_view: str) -> str:
+    if behavior_view not in {"pilot", "full"}:
+        raise ValueError(f"unknown behavior dataset view: {behavior_view!r}; expected 'pilot' or 'full'")
+    if behavior_view == "pilot":
+        input_path = entry.get("pilot_local_path")
+        if not input_path:
+            raise ValueError(f"{eval_id} has no pilot_local_path configured")
+        return str(input_path)
+    return str(entry.get("filtered_local_path") or entry["local_path"])
 
 
 def _collect_behavior_command(base_model_id: str, sync_to_hf: bool, dry_run_sync: bool) -> PlannedCommand:
