@@ -40,6 +40,21 @@ def normalize_messages(messages: list[dict]) -> list[dict[str, str]]:
     return out
 
 
+def find_last_subsequence(values: list[int], pattern: list[int]) -> int | None:
+    if not pattern or len(pattern) > len(values):
+        return None
+    last_start = len(values) - len(pattern)
+    for start in range(last_start, -1, -1):
+        if values[start : start + len(pattern)] == pattern:
+            return start
+    return None
+
+
+def token_ids(tokenizer, text: str) -> list[int]:
+    encoded = tokenizer(text, add_special_tokens=False)
+    return list(encoded["input_ids"])
+
+
 def tokenize_response_only(messages: list[dict], tokenizer, max_seq_length: int) -> TokenizedExample | None:
     messages = normalize_messages(messages)
     if not messages or messages[-1]["role"] != "assistant":
@@ -52,9 +67,12 @@ def tokenize_response_only(messages: list[dict], tokenizer, max_seq_length: int)
     if len(full_ids) > max_seq_length:
         full_ids = full_ids[:max_seq_length]
     labels = [-100] * len(full_ids)
-    assistant_start = min(len(prompt_ids), len(full_ids))
-    if assistant_start >= len(full_ids):
-        return None
+    assistant_content_ids = token_ids(tokenizer, messages[-1]["content"])
+    assistant_start = find_last_subsequence(full_ids, assistant_content_ids)
+    if assistant_start is None:
+        assistant_start = min(len(prompt_ids), len(full_ids))
+        if assistant_start >= len(full_ids):
+            return None
     labels[assistant_start:] = full_ids[assistant_start:]
     if all(label == -100 for label in labels):
         return None
@@ -201,8 +219,6 @@ def train_lora_adapter(
         limit=limit,
         seed=seed,
     )
-    if not tokenized:
-        raise ValueError("no tokenized training examples")
     run_inputs_manifest = {
         "dataset_id": dataset_id,
         "dataset_path": str(dataset_path),
@@ -211,6 +227,8 @@ def train_lora_adapter(
         "selected_target_modules": target_modules,
     }
     write_json(run.run_dir / "inputs" / "dataset_manifest.json", run_inputs_manifest)
+    if not tokenized:
+        raise ValueError(f"no tokenized training examples; see {run.run_dir / 'inputs' / 'dataset_manifest.json'}")
     train_dataset = ListDataset(tokenized)
     canonical_dir = Path(output_root) / model_id
     run_adapter_dir = run.run_dir / "checkpoints" / "adapter"
@@ -287,4 +305,3 @@ def _resolve_torch_dtype(torch_module, value: str):
         return mapping[value]
     except KeyError as exc:
         raise ValueError(f"unsupported torch dtype: {value}") from exc
-
