@@ -20,10 +20,15 @@ def collect_behavior_scores(
     category: str | None = "all",
     include_categories: bool = False,
     allow_missing_base: bool = False,
+    include_run_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     rows = load_aggregate_rows(runs_root=runs_root)
     if rows.empty:
         raise ValueError(f"no aggregate_scores.csv files found under {runs_root}")
+    if include_run_ids:
+        rows = rows[rows["run_id"].isin(set(include_run_ids))].copy()
+        if rows.empty:
+            raise ValueError(f"no aggregate rows found for requested run ids: {include_run_ids}")
     if not include_categories and category is not None:
         rows = rows[rows["category"].fillna("all") == category].copy()
     if rows.empty:
@@ -38,6 +43,7 @@ def collect_behavior_scores(
         "evals": sorted(scores["eval_id"].dropna().unique().tolist()),
         "base_model_id": base_model_id,
         "category": category if not include_categories else "all_categories",
+        "include_run_ids": include_run_ids,
     }
 
 

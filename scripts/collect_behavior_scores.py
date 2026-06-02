@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--category", default="all")
     parser.add_argument("--include-categories", action="store_true")
     parser.add_argument("--allow-missing-base", action="store_true")
+    parser.add_argument("--include-run-id", action="append", default=[])
     parser.add_argument("--run-id")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--sync-to-hf", action="store_true")
@@ -37,6 +38,7 @@ def main() -> None:
             "category": args.category,
             "include_categories": args.include_categories,
             "allow_missing_base": args.allow_missing_base,
+            "include_run_ids": args.include_run_id,
         },
         resume=args.resume or bool(args.run_id),
     )
@@ -48,6 +50,7 @@ def main() -> None:
             category=args.category,
             include_categories=args.include_categories,
             allow_missing_base=args.allow_missing_base,
+            include_run_ids=args.include_run_id or None,
         )
         run.update_progress(counters={"behavior_score_rows": result["rows"], "models": result["models"], "evals": len(result["evals"])}, completed_units=[args.output])
         run.mark_completed("behavior score collection complete")

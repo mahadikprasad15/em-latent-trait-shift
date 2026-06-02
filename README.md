@@ -75,3 +75,14 @@ The official StrongREJECT package uses its native judge-model defaults unless `-
 XSTest is scored through the published three-label refusal-classification protocol in the OpenAI judge backend. The default matrix uses `eval_sycophancy_answer`; `are_you_sure`, `feedback`, and `mimicry` are normalized as separate supplemental datasets rather than being mixed into one primary sycophancy outcome.
 
 For an actual behavior matrix run, use `--judge-backend benchmark_policy`: the planner routes StrongREJECT to its native rubric scorer and routes XSTest, OpenAI Persona Features evals, and the remaining v1 datasets through the OpenAI judge implementations.
+
+Plan the smallest end-to-end pilot under a tight judge budget:
+
+```bash
+python scripts/run_smallest_pilot.py \
+  --adapter-model-id llama32_3b_health_bad_s0 \
+  --judge-model gpt-5-nano \
+  --behavior-limit 30
+```
+
+The wrapper uses base plus one adapter, excludes StrongREJECT by default for predictable cost, evaluates 30 prompts per non-StrongREJECT eval, uses `neutral_all` only, and writes a scoped plan/summary under `artifacts/runs/<run_id>/inputs/`. Add `--execute` only when running on the intended GPU/API environment.

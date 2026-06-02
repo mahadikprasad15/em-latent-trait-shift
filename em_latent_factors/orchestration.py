@@ -54,6 +54,7 @@ def build_pipeline_plan(
     trait_id: str | None = None,
     generation_backend: str = "dry_run",
     judge_backend: str = "stub",
+    judge_model: str | None = None,
     stub_score: float | None = 0.0,
     activation_backend: str = "dry_run_metadata",
     sync_to_hf: bool = False,
@@ -90,7 +91,7 @@ def build_pipeline_plan(
     if "train" in stages:
         plan.extend(_train_plan(ft_models, datasets, base_model_name, sync_to_hf, dry_run_sync, limit))
     if "behavior" in stages:
-        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view))
+        plan.extend(_behavior_plan(model_specs, datasets, eval_id, generation_backend, judge_backend, judge_model, stub_score, sync_to_hf, dry_run_sync, limit, resolved_behavior_view))
     if "collect_behavior" in stages:
         plan.append(_collect_behavior_command(base_model_id=base_model_id, sync_to_hf=sync_to_hf, dry_run_sync=dry_run_sync))
     if "vector_rollouts" in stages:
@@ -175,7 +176,7 @@ def _train_plan(ft_models: list[dict], datasets: dict, model_name: str, sync_to_
     return plan
 
 
-def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str) -> list[PlannedCommand]:
+def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None, generation_backend: str, judge_backend: str, judge_model: str | None, stub_score: float | None, sync_to_hf: bool, dry_run_sync: bool, limit: int | None, behavior_view: str) -> list[PlannedCommand]:
     eval_entries = datasets.get("eval_datasets", {})
     eval_ids = [eval_id] if eval_id else list(eval_entries)
     if behavior_view not in {"pilot", "full"}:
@@ -213,6 +214,8 @@ def _behavior_plan(model_specs: list[dict], datasets: dict, eval_id: str | None,
             ]
             if resolved_judge_backend == "stub" and stub_score is not None:
                 command.extend(["--stub-score", str(stub_score)])
+            if resolved_judge_backend in {"openai", "strongreject"} and judge_model:
+                command.extend(["--judge-model", judge_model])
             if model.get("adapter_path"):
                 command.extend(["--adapter-path", model["adapter_path"]])
             _append_common(command, sync_to_hf, dry_run_sync, limit)
@@ -303,7 +306,7 @@ def _shift_plan(ft_models: list[dict], datasets: dict, neutral_bank: str | None,
                 "--resume",
             ]
             _append_common(command, sync_to_hf, dry_run_sync, None)
-            plan.append(_cmd("shifts", f"{model['model_id']}__{bank}", command, outputs=[f"artifacts/shifts/{model['model_id']}/{bank}/deltas.pt"], depends_on=[f"artifacts/activations/{base_model_id}/{bank}/mean_activations.pt", f"artifacts/activations/{model['model_id']}/{bank}/mean_activations.pt"]))
+            plan.append(_cmd("shifts", f"{model['model_id']}__{bank}", command, outputs=[f"artifacts/shifts/{model['model_id']}/{bank}/activation_shifts.pt"], depends_on=[f"artifacts/activations/{base_model_id}/{bank}/mean_activations.pt", f"artifacts/activations/{model['model_id']}/{bank}/mean_activations.pt"]))
     return plan
 
 
@@ -312,7 +315,7 @@ def _projection_plan(ft_models: list[dict], datasets: dict, neutral_bank: str | 
     plan = []
     for model in ft_models:
         for bank in banks:
-            shift_path = f"artifacts/shifts/{model['model_id']}/{bank}/deltas.pt"
+            shift_path = f"artifacts/shifts/{model['model_id']}/{bank}/activation_shifts.pt"
             command = ["scripts/compute_projections.py", "--shifts", shift_path, "--vector-model-id", vector_model_id, "--all-traits", "--resume"]
             _append_common(command, sync_to_hf, dry_run_sync, None)
             plan.append(_cmd("projections", f"{model['model_id']}__{bank}", command, outputs=["results/projections.csv"], depends_on=[shift_path, f"artifacts/vectors/{vector_model_id}"]))

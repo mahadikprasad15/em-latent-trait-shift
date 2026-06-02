@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--trait-id")
     parser.add_argument("--generation-backend", choices=["dry_run", "transformers"], default="dry_run")
     parser.add_argument("--judge-backend", choices=["stub", "benchmark_policy", "openai", "strongreject"], default="stub")
+    parser.add_argument("--judge-model")
     parser.add_argument("--behavior-view", choices=["pilot", "full"])
     parser.add_argument("--stub-score", type=float, default=0.0)
     parser.add_argument("--activation-backend", choices=["dry_run_metadata", "transformers"], default="dry_run_metadata")
@@ -49,6 +50,7 @@ def main() -> None:
             "trait_id": args.trait_id,
             "generation_backend": args.generation_backend,
             "judge_backend": args.judge_backend,
+            "judge_model": args.judge_model,
             "behavior_view": args.behavior_view,
             "stub_score": args.stub_score,
             "activation_backend": args.activation_backend,
@@ -68,6 +70,7 @@ def main() -> None:
             trait_id=args.trait_id,
             generation_backend=args.generation_backend,
             judge_backend=args.judge_backend,
+            judge_model=args.judge_model,
             stub_score=args.stub_score,
             activation_backend=args.activation_backend,
             sync_to_hf=args.sync_to_hf,
