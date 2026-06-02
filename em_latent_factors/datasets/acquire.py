@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 import json
+import shutil
+import zipfile
 
 from em_latent_factors.io import ensure_parent, write_jsonl
 
@@ -21,6 +23,13 @@ SECURITYEVAL_URLS = (
     "https://raw.githubusercontent.com/s2e-lab/SecurityEval/main/securityeval/dataset.jsonl",
 )
 OPENAI_PERSONA_FEATURES_EVAL_BASE = "https://raw.githubusercontent.com/openai/emergent-misalignment-persona-features/main/eval"
+OPENAI_PERSONA_FEATURES_LOCKED_FT_BASE = "https://raw.githubusercontent.com/openai/emergent-misalignment-persona-features/main/train/sft/synthetic/datasets_password_locked"
+OPENAI_PERSONA_FEATURES_ZIP_PASSWORD = b"emergent"
+OPENAI_PERSONA_FEATURES_FT_DATASETS = {
+    "ft_health_bad_advice": ("health_incorrect.zip", "health_incorrect.jsonl"),
+    "ft_finance_bad_advice": ("finance_incorrect.zip", "finance_incorrect.jsonl"),
+    "ft_insecure_code": ("insecure_code.zip", "insecure_code.jsonl"),
+}
 
 
 def resolve_hf_token(explicit_token: str | None = None) -> str | None:
@@ -55,6 +64,33 @@ def acquire_securityeval(force: bool = False) -> Path:
 
 def acquire_openai_persona_features_eval(filename: str, output_path: str | Path, force: bool = False) -> Path:
     return curl_download(f"{OPENAI_PERSONA_FEATURES_EVAL_BASE}/{filename}", output_path, force=force)
+
+
+def acquire_openai_persona_features_ft(dataset_id: str, force: bool = False) -> Path:
+    if dataset_id not in OPENAI_PERSONA_FEATURES_FT_DATASETS:
+        raise NotImplementedError(f"no OpenAI Persona Features FT dataset mapping for {dataset_id}")
+    zip_name, jsonl_name = OPENAI_PERSONA_FEATURES_FT_DATASETS[dataset_id]
+    output_path = ensure_parent(f"data/ft/{jsonl_name}")
+    if output_path.exists() and not force:
+        return output_path
+
+    zip_path = curl_download(
+        f"{OPENAI_PERSONA_FEATURES_LOCKED_FT_BASE}/{zip_name}",
+        f"data/external/openai_persona_features/{zip_name}",
+        force=force,
+    )
+    extract_dir = Path("data/external/openai_persona_features") / Path(zip_name).stem
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(extract_dir, pwd=OPENAI_PERSONA_FEATURES_ZIP_PASSWORD)
+
+    candidates = list(extract_dir.rglob(jsonl_name))
+    if not candidates:
+        candidates = list(extract_dir.rglob("*.jsonl"))
+    if len(candidates) != 1:
+        raise RuntimeError(f"expected one extracted jsonl for {dataset_id}, found {[str(p) for p in candidates]}")
+    shutil.copyfile(candidates[0], output_path)
+    return output_path
 
 
 def acquire_hf_dataset(
@@ -198,6 +234,8 @@ def _load_hf_dataset_from_repo_files(dataset_name: str, token: str | None):
 
 
 def acquire_dataset(dataset_id: str, hf_token: str | None = None, force: bool = False) -> list[Path]:
+    if dataset_id in OPENAI_PERSONA_FEATURES_FT_DATASETS:
+        return [acquire_openai_persona_features_ft(dataset_id, force=force)]
     if dataset_id == "eval_core_misalignment":
         return [acquire_openai_persona_features_eval("core_misalignment.csv", "data/external/core_misalignment.csv", force=force)]
     if dataset_id == "eval_extended_misalignment_by_category":

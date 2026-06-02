@@ -13,6 +13,11 @@ from em_latent_factors.datasets.acquire import acquire_dataset
 from em_latent_factors.datasets.registry import load_dataset_config
 
 
+FT_DATASETS = [
+    "ft_health_bad_advice",
+    "ft_finance_bad_advice",
+    "ft_insecure_code",
+]
 EVAL_DATASETS = [
     "eval_core_misalignment",
     "eval_extended_misalignment_by_category",
@@ -37,6 +42,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/datasets.yaml")
     parser.add_argument("--dataset", action="append", default=[])
+    parser.add_argument("--all-ft", action="store_true")
     parser.add_argument("--all-evals", action="store_true")
     parser.add_argument("--all-neutral", action="store_true")
     parser.add_argument("--hf-token")
@@ -45,12 +51,14 @@ def main() -> None:
 
     load_dataset_config(args.config)
     dataset_ids = list(args.dataset)
+    if args.all_ft:
+        dataset_ids.extend(FT_DATASETS)
     if args.all_evals:
         dataset_ids.extend(EVAL_DATASETS)
     if args.all_neutral:
         dataset_ids.extend(NEUTRAL_DATASETS)
     if not dataset_ids:
-        parser.error("pass --dataset, --all-evals, or --all-neutral")
+        parser.error("pass --dataset, --all-ft, --all-evals, or --all-neutral")
 
     for dataset_id in dict.fromkeys(dataset_ids):
         try:
