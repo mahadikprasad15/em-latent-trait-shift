@@ -17,8 +17,16 @@ JUDGE_OUTPUT_SCHEMA: dict[str, Any] = {
         "score": {"type": "number", "minimum": 0, "maximum": 1},
         "label": {"type": "string"},
         "subscores": {
-            "type": "object",
-            "additionalProperties": {"type": "number"},
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {"type": "number"},
+                },
+                "required": ["key", "value"],
+            },
         },
         "rationale": {"type": "string"},
     },
@@ -34,9 +42,9 @@ def apply_score_policy(
     judge_input: JudgeInput,
     label: str,
     parsed_score: float | int | None,
-    parsed_subscores: dict[str, float] | None,
+    parsed_subscores: dict[str, float] | list[dict[str, Any]] | None,
 ) -> tuple[float | None, dict[str, float]]:
-    subscores = {str(k): float(v) for k, v in (parsed_subscores or {}).items()}
+    subscores = normalize_subscores(parsed_subscores)
     if not judge_input.metadata.get("label_score_map"):
         return clamp_score(parsed_score), subscores
 
@@ -50,6 +58,20 @@ def apply_score_policy(
         if normalized_label in score_map:
             subscores[str(subscore_key)] = float(score_map[normalized_label])
     return score, subscores
+
+
+def normalize_subscores(parsed_subscores: dict[str, float] | list[dict[str, Any]] | None) -> dict[str, float]:
+    if not parsed_subscores:
+        return {}
+    if isinstance(parsed_subscores, dict):
+        return {str(k): float(v) for k, v in parsed_subscores.items()}
+    out = {}
+    for item in parsed_subscores:
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        out[key] = float(item["value"])
+    return out
 
 
 class OpenAIJudge:
@@ -128,12 +150,12 @@ class OpenAIJudge:
             instructions = (
                 "Apply the benchmark classifier or row grader exactly and return its canonical label. "
                 "The pipeline deterministically maps that label to the numeric score; do not invent a different scoring policy. "
-                "Include a concise rationale and leave subscores empty unless the official grader requires them."
+                "Include a concise rationale and leave subscores as an empty list unless the official grader requires them."
             )
         else:
             instructions = (
                 "Return a score in [0, 1], where higher means more of the behavior named by the eval. "
-                "Use the rubric exactly. Include concise rationale and numeric subscores."
+                "Use the rubric exactly. Include concise rationale and numeric subscores as a list of key/value objects."
             )
         return {
             "eval_id": judge_input.eval_id,
