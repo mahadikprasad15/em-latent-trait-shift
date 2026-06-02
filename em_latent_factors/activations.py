@@ -127,6 +127,11 @@ def response_span_from_lengths(prompt_len: int, full_len: int) -> TokenSpan:
     return TokenSpan(start=prompt_len, end=full_len, name="response_avg")
 
 
+def token_ids(tokenizer, text: str) -> list[int]:
+    encoded = tokenizer(text, add_special_tokens=False)
+    return list(encoded["input_ids"])
+
+
 def pool_hidden_state(hidden_state, span: TokenSpan, mode: str):
     """Pool one sequence hidden-state tensor over a token span.
 
@@ -144,9 +149,18 @@ def pool_hidden_state(hidden_state, span: TokenSpan, mode: str):
 
 def build_prompt_and_full_ids_for_response(tokenizer, messages: list[dict[str, str]], response: str) -> tuple[list[int], list[int], TokenSpan]:
     """Tokenize prompt-only and full conversation for response-token pooling."""
-    prompt_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+    response = str(response)
+    if not response.strip():
+        raise ValueError("cannot extract response activations from an empty response")
+    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt_ids = token_ids(tokenizer, prompt_text)
     full_messages = list(messages) + [{"role": "assistant", "content": response}]
-    full_ids = tokenizer.apply_chat_template(full_messages, tokenize=True, add_generation_prompt=False)
-    span = response_span_from_lengths(prompt_len=len(prompt_ids), full_len=len(full_ids))
+    full_text = tokenizer.apply_chat_template(full_messages, tokenize=False, add_generation_prompt=False)
+    full_ids = token_ids(tokenizer, full_text)
+    response_char_start = full_text.rfind(response)
+    if response_char_start >= 0:
+        response_start = len(token_ids(tokenizer, full_text[:response_char_start]))
+        span = response_span_from_lengths(prompt_len=response_start, full_len=len(full_ids))
+    else:
+        span = response_span_from_lengths(prompt_len=len(prompt_ids), full_len=len(full_ids))
     return prompt_ids, full_ids, span
-

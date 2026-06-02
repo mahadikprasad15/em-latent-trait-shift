@@ -138,19 +138,30 @@ def extract_rollout_activations(
     metadata_records: list[dict] = []
     layer_chunks: dict[int, list] = {layer: [] for layer in layer_selection.logical_layers}
     completed: list[str] = []
+    skipped = 0
 
     for batch_idx, start in enumerate(range(0, len(rows), batch_size)):
         batch = rows[start : start + batch_size]
+        valid_rows = []
         batch_full_ids = []
         batch_spans = []
         for row in batch:
-            prompt_ids, full_ids, span = build_prompt_and_full_ids_for_response(
-                tokenizer=tokenizer,
-                messages=row["messages"],
-                response=str(row.get("response", "")),
-            )
+            try:
+                prompt_ids, full_ids, span = build_prompt_and_full_ids_for_response(
+                    tokenizer=tokenizer,
+                    messages=row["messages"],
+                    response=str(row.get("response", "")),
+                )
+            except ValueError as exc:
+                skipped += 1
+                print(f"activation_skip prompt_id={rollout_prompt_id(row)} reason={exc}", flush=True)
+                continue
+            valid_rows.append(row)
             batch_full_ids.append(full_ids)
             batch_spans.append(span)
+        if not valid_rows:
+            run.update_progress(counters={"activation_records": len(metadata_records), "skipped_activation_rows": skipped})
+            continue
         encoded = tokenizer.pad(
             {"input_ids": batch_full_ids},
             padding=True,
@@ -159,8 +170,11 @@ def extract_rollout_activations(
         encoded = {k: v.to(model.device) for k, v in encoded.items()}
         with torch.no_grad():
             outputs = model(**encoded, output_hidden_states=True, use_cache=False)
-        for row_idx, row in enumerate(batch):
+        seq_len = encoded["input_ids"].shape[-1]
+        for row_idx, row in enumerate(valid_rows):
             span = batch_spans[row_idx]
+            pad_offset = seq_len - len(batch_full_ids[row_idx]) if tokenizer.padding_side == "left" else 0
+            span = type(span)(start=span.start + pad_offset, end=span.end + pad_offset, name=span.name)
             metadata_records.append(record_metadata(row))
             completed.append(rollout_prompt_id(row))
             for logical_layer, hidden_idx in zip(layer_selection.logical_layers, layer_selection.hidden_state_indices):
@@ -180,7 +194,7 @@ def extract_rollout_activations(
                 metadata_records=metadata_records,
                 layer_chunks=layer_chunks,
             )
-            run.update_progress(completed_units=completed, counters={"activation_records": len(metadata_records)})
+            run.update_progress(completed_units=completed, counters={"activation_records": len(metadata_records), "skipped_activation_rows": skipped})
             completed = []
 
     out = run.run_dir / "results" / "pooled_activations.pt"
@@ -195,7 +209,7 @@ def extract_rollout_activations(
     canonical_out = canonical_rollout_activation_path(model_id=model_id, rows=rows, output_root=output_root)
     ensure_parent(canonical_out)
     shutil.copy2(out, canonical_out)
-    run.update_progress(completed_units=completed, counters={"activation_records": len(metadata_records)})
+    run.update_progress(completed_units=completed, counters={"activation_records": len(metadata_records), "skipped_activation_rows": skipped})
     return out
 
 
