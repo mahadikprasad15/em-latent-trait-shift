@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from em_latent_factors.artifacts import RunContext, upload_artifact_to_hf
-from em_latent_factors.orchestration import build_pipeline_plan, execute_plan, write_plan_jsonl
+from em_latent_factors.orchestration import apply_skip_guards, build_pipeline_plan, execute_plan, write_plan_jsonl
 
 
 def main() -> None:
@@ -81,6 +81,9 @@ def main() -> None:
             behavior_view=args.behavior_view,
             behavior_batch_size=args.behavior_batch_size,
         )
+        behavior_run_ids = _assign_behavior_run_ids(plan, run.run_id)
+        _add_behavior_run_filter(plan, behavior_run_ids)
+        plan = apply_skip_guards(plan, behavior_limit=args.limit)
         plan_path = run.run_dir / "inputs" / "pipeline_plan.jsonl"
         write_plan_jsonl(plan_path, plan)
         _print_plan(plan)
@@ -120,6 +123,45 @@ def _print_plan(plan) -> None:
         print("      " + " ".join(_quote(part) for part in item.command))
         if item.skip_reason:
             print(f"      skip_reason: {item.skip_reason}")
+
+
+def _assign_behavior_run_ids(plan, parent_run_id: str) -> list[str]:
+    run_ids = []
+    for item in plan:
+        if item.stage not in {"behavior", "behavior_generation", "behavior_judging", "behavior_aggregation"}:
+            continue
+        if "--run-id" in item.command:
+            continue
+        model_id = _command_arg(item.command, "--model-id")
+        eval_id = _command_arg(item.command, "--eval-id")
+        if not model_id or not eval_id:
+            continue
+        run_id = f"{parent_run_id}__behavior__{model_id}__{eval_id}"
+        item.command.extend(["--run-id", run_id])
+        if run_id not in run_ids:
+            run_ids.append(run_id)
+    return run_ids
+
+
+def _add_behavior_run_filter(plan, behavior_run_ids: list[str]) -> None:
+    if not behavior_run_ids:
+        return
+    for item in plan:
+        if item.stage != "collect_behavior":
+            continue
+        for run_id in behavior_run_ids:
+            item.command.extend(["--include-run-id", run_id])
+
+
+def _command_arg(command: list[str], flag: str) -> str | None:
+    try:
+        idx = command.index(flag)
+    except ValueError:
+        return None
+    try:
+        return str(command[idx + 1])
+    except IndexError:
+        return None
 
 
 def _quote(value: object) -> str:

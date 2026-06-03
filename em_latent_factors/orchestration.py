@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+import csv
 import json
 import subprocess
 import sys
@@ -141,6 +142,15 @@ def write_plan_jsonl(path: str | Path, plan: list[PlannedCommand]) -> None:
             f.write(json.dumps(asdict(item), ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def apply_skip_guards(plan: list[PlannedCommand], behavior_limit: int | None = None) -> list[PlannedCommand]:
+    """Mark expensive commands skipped when their canonical artifacts already exist."""
+    guarded = []
+    for item in plan:
+        skip_reason = item.skip_reason or _completed_skip_reason(item, behavior_limit=behavior_limit)
+        guarded.append(replace(item, skip_reason=skip_reason))
+    return guarded
+
+
 def execute_plan(plan: list[PlannedCommand], stop_on_error: bool = True) -> list[dict[str, Any]]:
     results = []
     for item in plan:
@@ -153,6 +163,139 @@ def execute_plan(plan: list[PlannedCommand], stop_on_error: bool = True) -> list
         if result.returncode != 0 and stop_on_error:
             break
     return results
+
+
+def _completed_skip_reason(item: PlannedCommand, behavior_limit: int | None) -> str | None:
+    if item.stage == "train":
+        model_id = _command_arg(item.command, "--model-id")
+        if model_id and _all_exist(
+            [
+                f"checkpoints/{model_id}/adapter/adapter_config.json",
+                f"checkpoints/{model_id}/train_config.json",
+            ]
+        ):
+            return "completed training artifacts exist"
+    if item.stage == "behavior":
+        run_id = _command_arg(item.command, "--run-id")
+        limit = _command_int(item.command, "--limit") or behavior_limit
+        if run_id and _behavior_aggregate_exists(run_id) and _jsonl_has_at_least(_behavior_result_path(run_id, "judge_scores.jsonl"), limit):
+            return "completed behavior generation/judging/aggregation artifacts exist"
+    if item.stage == "behavior_generation":
+        run_id = _command_arg(item.command, "--run-id")
+        limit = _command_int(item.command, "--limit") or behavior_limit
+        if run_id and _jsonl_has_at_least(_behavior_result_path(run_id, "generations.jsonl"), limit):
+            return "completed behavior generations exist"
+    if item.stage == "behavior_judging":
+        run_id = _command_arg(item.command, "--run-id")
+        limit = _command_int(item.command, "--limit") or behavior_limit
+        if run_id and _jsonl_has_at_least(_behavior_result_path(run_id, "judge_scores.jsonl"), limit):
+            return "completed behavior judge scores exist"
+    if item.stage == "behavior_aggregation":
+        run_id = _command_arg(item.command, "--run-id")
+        if run_id and _behavior_aggregate_exists(run_id):
+            return "completed behavior aggregate exists"
+    if item.stage == "vector_rollouts":
+        trait_ids = _trait_ids_from_command(item.command)
+        if trait_ids and all(_rollout_split_complete(trait_id) for trait_id in trait_ids):
+            return "completed canonical vector rollout splits exist"
+    if item.stage == "rollout_activations" and _all_exist(item.outputs):
+        return "completed rollout activation artifact exists"
+    if item.stage == "trait_vectors":
+        model_id = _command_arg(item.command, "--model-id") or "base"
+        trait_ids = all_trait_ids() if "--all-traits" in item.command else _trait_ids_from_command(item.command)
+        if trait_ids and all((Path("artifacts/vectors") / model_id / trait_id / "metadata.json").exists() for trait_id in trait_ids):
+            return "completed trait vector artifacts exist"
+    if item.stage in {"neutral_activations", "shifts"} and _all_exist(item.outputs):
+        return f"completed {item.stage} artifact exists"
+    if item.stage == "projections" and _projection_rows_exist(item.command):
+        return "completed projection rows exist"
+    return None
+
+
+def _command_arg(command: list[str], flag: str) -> str | None:
+    try:
+        idx = command.index(flag)
+    except ValueError:
+        return None
+    try:
+        return str(command[idx + 1])
+    except IndexError:
+        return None
+
+
+def _command_int(command: list[str], flag: str) -> int | None:
+    value = _command_arg(command, flag)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _all_exist(paths: list[str]) -> bool:
+    return bool(paths) and all(Path(path).exists() for path in paths)
+
+
+def _jsonl_row_count(path: str | Path) -> int:
+    path = Path(path)
+    if not path.exists():
+        return 0
+    with path.open("r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
+
+
+def _jsonl_has_at_least(path: str | Path, expected_rows: int | None) -> bool:
+    if expected_rows is None:
+        return Path(path).exists() and _jsonl_row_count(path) > 0
+    return _jsonl_row_count(path) >= expected_rows
+
+
+def _behavior_result_path(run_id: str, filename: str) -> Path:
+    return Path("artifacts/runs") / run_id / "results" / filename
+
+
+def _behavior_aggregate_exists(run_id: str) -> bool:
+    result_dir = Path("artifacts/runs") / run_id / "results"
+    return (result_dir / "aggregate_scores.json").exists() and (result_dir / "aggregate_scores.csv").exists()
+
+
+def _trait_ids_from_command(command: list[str]) -> list[str]:
+    if "--all-traits" in command:
+        return all_trait_ids()
+    trait_ids = []
+    for idx, value in enumerate(command):
+        if value == "--trait-id" and idx + 1 < len(command):
+            trait_ids.append(str(command[idx + 1]))
+    return list(dict.fromkeys(trait_ids))
+
+
+def _rollout_split_complete(trait_id: str) -> bool:
+    root = Path("data/vector_rollouts") / trait_id
+    return _jsonl_has_at_least(root / "positive.jsonl", 1) and _jsonl_has_at_least(root / "negative.jsonl", 1)
+
+
+def _projection_rows_exist(command: list[str]) -> bool:
+    path = Path("results/projections.csv")
+    if not path.exists():
+        return False
+    shifts_path = _command_arg(command, "--shifts")
+    vector_model_id = _command_arg(command, "--vector-model-id")
+    if not shifts_path or not vector_model_id:
+        return False
+    parts = Path(shifts_path).parts
+    try:
+        model_id = parts[parts.index("shifts") + 1]
+        neutral_bank = parts[parts.index("shifts") + 2]
+    except (ValueError, IndexError):
+        return False
+    expected_traits = set(all_trait_ids()) if "--all-traits" in command else set(_trait_ids_from_command(command))
+    seen_traits = set()
+    with path.open("r", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("model_id") == model_id and row.get("neutral_bank") == neutral_bank and row.get("vector_model_id") == vector_model_id:
+                seen_traits.add(str(row.get("trait_id")))
+    return bool(expected_traits) and expected_traits.issubset(seen_traits)
 
 
 def _validate_plan() -> list[PlannedCommand]:
